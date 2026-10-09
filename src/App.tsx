@@ -1,0 +1,433 @@
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  call,
+  on,
+  onDrop,
+  onFocus,
+  type AppItem,
+  type Clip,
+  type Cover,
+  type Cursor,
+  type InitPayload,
+  type Media,
+  type PinItem,
+  type Settings,
+  type ShelfItem,
+  type Volume,
+} from "./api";
+import { Liquid, type LiquidTarget } from "./liquid";
+import { accentFrom, DEFAULT_ACCENT, type RGB } from "./lib/color";
+import { Compact, Peek } from "./components/Compact";
+import { Toast, type ToastData } from "./components/Toast";
+import { DropZones, type DropZone } from "./components/DropZones";
+import { Panel, type Tab } from "./components/Panel";
+import { Launcher } from "./components/Launcher";
+
+type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher";
+
+const BOX: Record<Exclude<Mode, "launcher">, { w: number; h: number; r: number }> = {
+  hidden: { w: 0, h: 0, r: 0 },
+  idle: { w: 176, h: 30, r: 15 },
+  music: { w: 320, h: 38, r: 19 },
+  peek: { w: 430, h: 70, r: 28 },
+  toast: { w: 400, h: 66, r: 27 },
+  drop: { w: 600, h: 160, r: 30 },
+  panel: { w: 820, h: 440, r: 30 },
+};
+
+const LAUNCHER_W = 680;
+
+export default function App({ boot }: { boot: InitPayload }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const clipRef = useRef<HTMLDivElement>(null);
+  const liquidRef = useRef<Liquid | null>(null);
+
+  const [settings, setSettings] = useState<Settings>(boot.settings);
+  const [media, setMedia] = useState<Media | null>(boot.media);
+  const [mediaAt, setMediaAt] = useState(Date.now());
+  const [cover, setCover] = useState<Cover>(boot.cover);
+  const [accent, setAccent] = useState<RGB>(DEFAULT_ACCENT);
+  const [volume, setVolume] = useState<Volume>(boot.volume);
+  const [clips, setClips] = useState<Clip[]>(boot.clips);
+  const [shelf, setShelf] = useState<ShelfItem[]>(boot.data.shelf);
+  const [pins, setPins] = useState<PinItem[]>(boot.data.pins);
+  const [usage, setUsage] = useState<Record<string, number>>(boot.data.usage);
+  const [apps, setApps] = useState<AppItem[]>([]);
+
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const [tab, setTab] = useState<Tab>("home");
+  const [launcherOpen, setLauncherOpen] = useState(false);
+  const [launcherH, setLauncherH] = useState(64);
+  const [drop, setDrop] = useState<{ paths: string[]; zone: DropZone | null } | null>(null);
+  const [toast, setToast] = useState<ToastData | null>(null);
+  const [peek, setPeek] = useState(false);
+  const [suppressed, setSuppressed] = useState(false);
+
+  // latest values for long-lived event listeners
+  const live = useRef({ panelOpen, pinned, launcherOpen, drop, settings, media, armed: true, lmb: false, busy: false });
+  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media };
+
+  const mode: Mode = suppressed
+    ? "hidden"
+    : launcherOpen
+      ? "launcher"
+      : drop
+        ? "drop"
+        : panelOpen
+          ? "panel"
+          : toast
+            ? "toast"
+            : peek && media
+              ? "peek"
+              : media?.playing
+                ? "music"
+                : "idle";
+
+  const box = mode === "launcher" ? { w: LAUNCHER_W, h: launcherH, r: 26 } : BOX[mode];
+
+  // ---- liquid canvas -------------------------------------------------------
+  useLayoutEffect(() => {
+    const liquid = new Liquid(canvasRef.current!);
+    liquidRef.current = liquid;
+    liquid.onBox = (w, h, r) => {
+      const el = clipRef.current;
+      if (!el) return;
+      el.style.left = `${liquid.centerX - w / 2}px`;
+      el.style.width = `${w}px`;
+      el.style.height = `${Math.max(0, h)}px`;
+      el.style.borderRadius = `0 0 ${r}px ${r}px`;
+    };
+    return () => {
+      liquid.destroy();
+      if (liquidRef.current === liquid) liquidRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const liquid = liquidRef.current;
+    if (!liquid) return;
+    const music = !!media?.playing;
+    const rimFor = (): LiquidTarget["rim"] => {
+      switch (mode) {
+        case "music":
+        case "peek":
+          return [accent[0], accent[1], accent[2], 0.95];
+        case "drop":
+          return [151, 135, 255, 0.9];
+        case "toast":
+          return toast?.tone === "error" ? [255, 99, 99, 0.85] : [255, 255, 255, 0.16];
+        case "panel":
+        case "launcher":
+          return music ? [accent[0], accent[1], accent[2], 0.35] : [255, 255, 255, 0.08];
+        default:
+          return [255, 255, 255, 0.1];
+      }
+    };
+    liquid.setTarget({
+      w: box.w,
+      h: box.h,
+      r: box.r,
+      pull: settings.cursorPull && (mode === "idle" || mode === "music" || mode === "toast" || mode === "peek"),
+      wave: settings.musicReactive && music && (mode === "music" || mode === "peek"),
+      bars: music && (mode === "music" || mode === "peek"),
+      rim: rimFor(),
+      shadow: mode === "panel" || mode === "launcher" || mode === "drop",
+    });
+    const pad = mode === "drop" ? 24 : mode === "panel" || mode === "launcher" ? 10 : 6;
+    const rect = box.w > 0 ? { x: liquid.centerX - box.w / 2 - pad, y: 0, w: box.w + pad * 2, h: box.h + pad } : { x: 0, y: 0, w: 0, h: 0 };
+    (window as any).__islandHit = rect;
+    call("set_hit", { rect }).catch(() => {});
+  }, [mode, box.w, box.h, box.r, accent, media?.playing, settings.cursorPull, settings.musicReactive, toast?.tone]);
+
+  // ---- accent from cover ---------------------------------------------------
+  useEffect(() => {
+    if (!cover.url) {
+      setAccent(DEFAULT_ACCENT);
+      return;
+    }
+    let alive = true;
+    accentFrom(cover.url).then((c) => alive && setAccent(c));
+    return () => {
+      alive = false;
+    };
+  }, [cover.url]);
+
+  // ---- helpers -------------------------------------------------------------
+  const toastTimer = useRef(0);
+  const showToast = useCallback((t: ToastData, ms = 2400) => {
+    setToast(t);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), ms);
+  }, []);
+
+  const peekTimer = useRef(0);
+  const triggerPeek = useCallback(() => {
+    setPeek(true);
+    window.clearTimeout(peekTimer.current);
+    peekTimer.current = window.setTimeout(() => setPeek(false), 3600);
+  }, []);
+
+  const restoreFocus = useCallback(() => {
+    if (document.hasFocus()) call("launcher_closed", { restore: true }).catch(() => {});
+  }, []);
+
+  const closePanel = useCallback(() => {
+    setPanelOpen(false);
+    restoreFocus();
+  }, [restoreFocus]);
+
+  // Opened from the tray: the hover logic is armed only once the cursor reaches
+  // the island; if it never does, fold back after a while.
+  const unarmedTimer = useRef(0);
+  const openPanel = useCallback(
+    (t?: Tab, armed = true) => {
+      if (t) setTab(t);
+      live.current.armed = armed;
+      setPanelOpen(true);
+      window.clearTimeout(unarmedTimer.current);
+      if (!armed) {
+        unarmedTimer.current = window.setTimeout(() => {
+          const n = live.current;
+          if (!n.armed && n.panelOpen && !n.pinned && !n.busy) closePanel();
+        }, 9000);
+      }
+    },
+    [closePanel],
+  );
+
+  const bumpUsage = useCallback((target: string) => {
+    setUsage((u) => ({ ...u, [target]: (u[target] ?? 0) + 1 }));
+  }, []);
+
+  const appsLoadedAt = useRef(0);
+  const loadApps = useCallback((refresh = false) => {
+    if (!refresh && Date.now() - appsLoadedAt.current < 5 * 60e3 && appsLoadedAt.current) return;
+    appsLoadedAt.current = Date.now();
+    call<AppItem[]>("list_apps", { refresh }).then(setApps).catch(() => {});
+  }, []);
+
+  const openLauncher = useCallback(() => {
+    setPanelOpen(false);
+    setLauncherOpen(true);
+    loadApps(false);
+  }, [loadApps]);
+
+  const closeLauncher = useCallback((restore: boolean) => {
+    setLauncherOpen(false);
+    call("launcher_closed", { restore }).catch(() => {});
+  }, []);
+
+  // ---- native events -------------------------------------------------------
+  useEffect(() => {
+    let enterT = 0;
+    let leaveT = 0;
+    const subs: Promise<() => void>[] = [];
+
+    subs.push(
+      on<Cursor>("cursor", (c) => {
+        const s = live.current;
+        s.lmb = c.lmb;
+        liquidRef.current?.setCursor(c.x, c.y, c.inside);
+        if (c.inside) {
+          s.armed = true;
+          window.clearTimeout(leaveT);
+          leaveT = 0;
+          if (!s.panelOpen && !s.launcherOpen && !s.drop && s.settings.hoverExpand && !c.lmb && !enterT) {
+            enterT = window.setTimeout(() => {
+              enterT = 0;
+              const n = live.current;
+              if (!n.panelOpen && !n.launcherOpen && !n.drop) openPanel(undefined, true);
+            }, 200);
+          }
+        } else {
+          window.clearTimeout(enterT);
+          enterT = 0;
+          if (s.panelOpen && !s.pinned && s.armed && !leaveT) {
+            leaveT = window.setTimeout(function check() {
+              leaveT = 0;
+              const n = live.current;
+              if (!n.panelOpen || n.pinned) return;
+              if (n.lmb || n.busy) {
+                leaveT = window.setTimeout(check, 300);
+                return;
+              }
+              closePanel();
+            }, 420);
+          }
+        }
+      }),
+    );
+    subs.push(
+      on<Media | null>("media", (m) => {
+        const prev = live.current.media;
+        setMedia(m);
+        setMediaAt(Date.now());
+        if (m && m.playing && (!prev || prev.title !== m.title || prev.artist !== m.artist) && !live.current.panelOpen) triggerPeek();
+      }),
+    );
+    subs.push(on<Cover>("cover", setCover));
+    subs.push(on<number>("audio", (l) => liquidRef.current?.setAudio(l)));
+    subs.push(on<Volume>("volume", setVolume));
+    subs.push(on<Clip[]>("clips", setClips));
+    subs.push(on<boolean>("suppressed", setSuppressed));
+    subs.push(
+      on<boolean>("launcher", (open) => {
+        if (open) openLauncher();
+        else closeLauncher(true);
+      }),
+    );
+    subs.push(
+      on<string>("open-panel", (t) => {
+        setLauncherOpen(false);
+        openPanel((t as Tab) || "home", false);
+      }),
+    );
+    subs.push(
+      onFocus((focused) => {
+        if (!focused && live.current.launcherOpen) closeLauncher(false);
+      }),
+    );
+    subs.push(
+      onDrop((e) => {
+        const cx = liquidRef.current?.centerX ?? window.innerWidth / 2;
+        if (e.type === "enter") setDrop({ paths: e.paths, zone: null });
+        else if (e.type === "over") {
+          const zone: DropZone | null = e.y > BOX.drop.h + 30 ? null : e.x < cx ? "shelf" : "launcher";
+          setDrop((d) => (d && d.zone !== zone ? { ...d, zone } : d));
+        } else if (e.type === "leave") setDrop(null);
+        else if (e.type === "drop") {
+          const zone: DropZone = e.x >= cx && e.y <= BOX.drop.h + 30 ? "launcher" : "shelf";
+          setDrop(null);
+          handleDrop(e.paths, zone);
+        }
+      }),
+    );
+
+    // app list in the background so the first Alt+Space is instant
+    const t = window.setTimeout(() => loadApps(true), 2500);
+    return () => {
+      window.clearTimeout(t);
+      subs.forEach((p) => p.then((un) => un()));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleDrop = async (paths: string[], zone: DropZone) => {
+    if (!paths.length) return;
+    const name = paths.length === 1 ? paths[0].split(/[\\/]/).pop()! : `${paths.length} файла(ов)`;
+    if (zone === "launcher") {
+      const next = await call<PinItem[]>("pins_add", { targets: paths });
+      setPins(next);
+      showToast({ icon: "launcher", title: "Добавлено в лаунчер", subtitle: name });
+    } else {
+      const next = await call<ShelfItem[]>("shelf_add", { paths });
+      setShelf(next);
+      showToast({ icon: "shelf", title: "Положено на полку", subtitle: name });
+    }
+  };
+
+  useEffect(() => {
+    if (boot.hotkeyError)
+      showToast({ icon: "error", tone: "error", title: `${boot.settings.hotkey} занято`, subtitle: "Назначьте другое сочетание в настройках" }, 6000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Esc closes the panel
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && live.current.panelOpen && !live.current.launcherOpen) {
+        setPinned(false);
+        closePanel();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [closePanel]);
+
+  const saveSettings = useCallback(
+    async (next: Settings) => {
+      try {
+        const saved = await call<Settings>("save_settings", { settings: next });
+        setSettings(saved);
+      } catch (e) {
+        showToast({ icon: "error", tone: "error", title: "Не сохранилось", subtitle: String(e) }, 3500);
+      }
+    },
+    [showToast],
+  );
+
+  const setBusy = useCallback((b: boolean) => {
+    live.current.busy = b;
+  }, []);
+
+  const content = useMemo(() => {
+    switch (mode) {
+      case "music":
+        return <Compact cover={cover.url} />;
+      case "peek":
+        return media ? <Peek media={media} cover={cover.url} /> : null;
+      case "toast":
+        return toast ? <Toast data={toast} /> : null;
+      case "drop":
+        return <DropZones zone={drop?.zone ?? null} count={drop?.paths.length ?? 0} />;
+      case "panel":
+        return (
+          <Panel
+            tab={tab}
+            setTab={setTab}
+            pinned={pinned}
+            setPinned={setPinned}
+            settings={settings}
+            saveSettings={saveSettings}
+            media={media}
+            mediaAt={mediaAt}
+            cover={cover.url}
+            accent={accent}
+            volume={volume}
+            clips={clips}
+            shelf={shelf}
+            setShelf={setShelf}
+            pins={pins}
+            setPins={setPins}
+            version={boot.version}
+            onClose={closePanel}
+            onLauncher={() => call("open_launcher")}
+            toast={showToast}
+            setBusy={setBusy}
+          />
+        );
+      case "launcher":
+        return (
+          <Launcher
+            apps={apps}
+            pins={pins}
+            shelf={shelf}
+            usage={usage}
+            hotkey={settings.hotkey}
+            onHeight={setLauncherH}
+            onClose={closeLauncher}
+            toast={showToast}
+            onLaunch={bumpUsage}
+          />
+        );
+      default:
+        return null;
+    }
+  }, [mode, cover.url, media, mediaAt, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, setBusy, bumpUsage]);
+
+  const onIslandClick = () => {
+    if (mode === "idle" || mode === "music" || mode === "peek" || mode === "toast") openPanel("home", true);
+  };
+
+  return (
+    <div className={`root ${suppressed ? "is-hidden" : ""}`}>
+      <canvas ref={canvasRef} className="liquid" />
+      <div ref={clipRef} className={`island mode-${mode}`} onClick={onIslandClick}>
+        <div className="island-inner" style={{ width: box.w, height: box.h }} key={mode}>
+          {content}
+        </div>
+      </div>
+    </div>
+  );
+}
