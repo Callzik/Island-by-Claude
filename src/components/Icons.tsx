@@ -27,6 +27,13 @@ export const IHome = (p: P) => (
     <path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z" />
   </Svg>
 );
+export const ILyrics = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 6.5h9M4 11h6M4 15.5h5" />
+    <path d="M17.5 16V6.2l3 1.3" />
+    <circle cx="15.5" cy="16" r="2" />
+  </Svg>
+);
 export const IClipboard = (p: P) => (
   <Svg {...p}>
     <rect x="5" y="4.5" width="14" height="16" rx="2.5" />

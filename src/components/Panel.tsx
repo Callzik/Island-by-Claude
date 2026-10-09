@@ -1,16 +1,18 @@
 import type { Clip, Media, PinItem, Settings, ShelfItem, Volume } from "../api";
 import type { RGB } from "../lib/color";
-import { IClipboard, IHome, IInbox, IPin, ISliders } from "./Icons";
+import { IClipboard, IHome, IInbox, ILyrics, IPin, ISliders } from "./Icons";
 import { Home } from "./Home";
+import { Lyrics } from "./Lyrics";
 import { ClipboardTab } from "./ClipboardTab";
 import { ShelfTab } from "./ShelfTab";
 import { SettingsTab } from "./SettingsTab";
 import type { ToastData } from "./Toast";
 
-export type Tab = "home" | "clipboard" | "shelf" | "settings";
+export type Tab = "home" | "lyrics" | "clipboard" | "shelf" | "settings";
 
 const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome }[] = [
   { id: "home", label: "Главная", Icon: IHome },
+  { id: "lyrics", label: "Текст", Icon: ILyrics },
   { id: "clipboard", label: "Буфер", Icon: IClipboard },
   { id: "shelf", label: "Полка", Icon: IInbox },
 ];
@@ -71,6 +73,7 @@ export function Panel(p: PanelProps) {
       </header>
       <section className="panel-body">
         {p.tab === "home" && <Home {...p} />}
+        {p.tab === "lyrics" && <Lyrics media={p.media} mediaAt={p.mediaAt} accent={p.accent} />}
         {p.tab === "clipboard" && <ClipboardTab clips={p.clips} onClose={p.onClose} toast={p.toast} />}
         {p.tab === "shelf" && <ShelfTab shelf={p.shelf} setShelf={p.setShelf} toast={p.toast} setBusy={p.setBusy} />}
         {p.tab === "settings" && <SettingsTab settings={p.settings} save={p.saveSettings} version={p.version} setBusy={p.setBusy} />}
