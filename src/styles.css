@@ -2766,7 +2766,7 @@ html.is-overlay body {
 /* picker in settings */
 .res-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  grid-template-columns: repeat(5, 1fr);
   gap: 6px;
   padding: 10px;
 }
@@ -2797,4 +2797,24 @@ html.is-overlay body {
   color: var(--text);
   background: var(--raised);
   border-color: rgba(255, 255, 255, 0.08);
+}
+
+.res-none {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.res-none:hover {
+  color: var(--text);
+}
+
+.res-none.on {
+  background: var(--raised);
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.12);
 }

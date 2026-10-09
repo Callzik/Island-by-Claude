@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { on, type Cursor } from "../api";
-import { byId, ResidentSvg, type Face } from "../lib/residents";
+import { byId, FRAMES, ResidentSvg, type Anim, type Face } from "../lib/residents";
 
 export interface IslandBox {
   cx: number;
@@ -13,6 +13,12 @@ export interface IslandBox {
 }
 
 const SIZE = 28;
+
+interface Mood {
+  reactStart: number;
+  reactUntil: number;
+  calmUntil: number;
+}
 
 interface Walker {
   u: number; // -1..1 along the edge
@@ -45,6 +51,7 @@ export function Residents({
   const asleepRef = useRef(asleep);
   asleepRef.current = asleep;
   const walkers = useRef<Walker[]>([]);
+  const moods = useRef<Mood[]>([]);
 
   useEffect(() => {
     const subs = [
@@ -64,6 +71,7 @@ export function Residents({
     let last = performance.now();
     let lastFace = 0;
     const centers: { x: number; y: number; flip: boolean }[] = [];
+    const anims: { anim: Anim; frame: number }[] = [];
 
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
@@ -83,10 +91,12 @@ export function Residents({
         let x: number;
         let y: number;
         let flip = false;
+        let moving = false;
         const walker = i % 3 === 0;
         if (walker) {
           const w = (walkers.current[i] ??= { u: (i * 0.37) % 1 - 0.5, dir: i % 2 ? 1 : -1, speed: 0.08 + ((i * 7) % 5) * 0.015, pauseUntil: 0 });
           if (!sleeping && now > w.pauseUntil) {
+            moving = true;
             w.u += w.dir * w.speed * dt * (1 + amp);
             if (Math.abs(w.u) > 1) {
               w.u = Math.sign(w.u);
@@ -106,16 +116,33 @@ export function Residents({
           y = 1;
           flip = right; // look toward the island
         }
-        const hop = -Math.abs(Math.sin(t * 7.5 + i * 1.3)) * amp * 8;
+        // which animation and frame: react (cursor came close) > walk > idle
+        const mood = (moods.current[i] ??= { reactStart: 0, reactUntil: 0, calmUntil: 0 });
+        const c = cursor.current;
+        const near = !!c && Date.now() - c.at < 1500 && Math.hypot(c.x - (x + SIZE / 2), c.y - (y + SIZE / 2)) < 55;
+        if (near && !sleeping && now > mood.calmUntil) {
+          mood.reactStart = now;
+          mood.reactUntil = now + 900;
+          mood.calmUntil = now + 3500;
+        }
+        const anim: Anim = sleeping ? "idle" : now < mood.reactUntil ? "react" : moving ? "walk" : "idle";
+        const fr = FRAMES[anim];
+        const frame =
+          sleeping ? 0 : anim === "react" ? Math.min(fr.n - 1, Math.floor(((now - mood.reactStart) / 1000) * fr.fps)) : Math.floor(t * fr.fps + i * 1.7) % fr.n;
+        anims[i] = { anim, frame };
+
+        const hop = -Math.abs(Math.sin(t * 7.5 + i * 1.3)) * amp * 8 + (anim === "react" ? -[5, 7, 3][frame] : 0) + (anim === "walk" && frame % 2 ? -1.2 : 0);
+        const tilt = anim === "walk" ? (frame % 2 ? 5 : -5) : 0;
+        const stretch = anim === "react" ? [1.12, 1.05, 0.96][frame] : 1;
         const breathe = sleeping ? 1 + Math.sin(t * 1.4 + i) * 0.03 : 1 + Math.sin(t * 2.2 + i) * 0.015;
         const hidden = box.w <= 0 || x < 2 || x > W - SIZE - 2;
         el.style.opacity = hidden ? "0" : "";
-        el.style.transform = `translate(${x}px, ${y + hop}px) scale(${flip ? -1 : 1}, ${breathe})`;
+        el.style.transform = `translate(${x}px, ${y + hop}px) rotate(${tilt}deg) scale(${(flip ? -1 : 1) / Math.sqrt(stretch)}, ${breathe * stretch})`;
         centers[i] = { x: x + SIZE / 2, y: y + SIZE / 2, flip };
       });
 
       // faces (eye direction) a few times a second
-      if (now - lastFace > 110) {
+      if (now - lastFace > 60) {
         lastFace = now;
         const c = cursor.current && Date.now() - cursor.current.at < 4000 ? cursor.current : null;
         setFaces((prev) => {
@@ -128,9 +155,12 @@ export function Residents({
               ly = Math.max(-1, Math.min(1, (c.y - p.y) / 90));
               if (p.flip) lx = -lx;
             }
-            return { look: { x: Math.round(lx * 10) / 10, y: Math.round(ly * 10) / 10 }, asleep: sleeping };
+            const a = anims[i] ?? { anim: "idle" as Anim, frame: 0 };
+            return { look: { x: Math.round(lx * 10) / 10, y: Math.round(ly * 10) / 10 }, asleep: sleeping, anim: a.anim, frame: a.frame };
           });
-          const same = prev.length === next.length && prev.every((f, i) => f.look.x === next[i].look.x && f.look.y === next[i].look.y && f.asleep === next[i].asleep);
+          const same =
+            prev.length === next.length &&
+            prev.every((f, i) => f.look.x === next[i].look.x && f.look.y === next[i].look.y && f.asleep === next[i].asleep && f.anim === next[i].anim && f.frame === next[i].frame);
           return same ? prev : next;
         });
       }

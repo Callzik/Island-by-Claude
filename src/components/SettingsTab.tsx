@@ -385,9 +385,12 @@ export function SettingsTab({
         </div>
         <div className="setting">
           <div>
-            <div className="setting-title">Выбрано: {settings.residents.length} из {RESIDENTS.length}</div>
+            <div className="setting-title">{settings.residents.length ? `Живут: ${settings.residents.length} из ${RESIDENTS.length}` : "Без жильца"}</div>
             <div className="setting-sub">Нажмите на жильца, чтобы поселить или выселить</div>
           </div>
+          <button className={`res-none ${settings.residents.length ? "" : "on"}`} onClick={() => set("residents", [])}>
+            Без жильца
+          </button>
         </div>
         <div className="setting setting-wide res-grid">
           {RESIDENTS.map((r) => {
