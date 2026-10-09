@@ -27,6 +27,8 @@ cpal = "0.15"
 notify = { version = "8", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
+# needed by the #[interface] macro (IPolicyConfig)
+windows-core = "0.62"
 windows = { version = "0.62", features = [
   "Foundation",
   "Foundation_Collections",

@@ -614,7 +614,7 @@ input::placeholder {
 }
 
 .device-chip {
-  max-width: 150px;
+  max-width: 170px;
   height: 32px;
   padding: 0 11px;
   border-radius: 10px;
@@ -2367,4 +2367,76 @@ html.is-overlay body {
   font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* output device menu */
+.device-menu {
+  position: relative;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.device-chip:hover,
+.device-chip.open {
+  color: var(--text);
+}
+
+.device-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 270px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 5px;
+  border-radius: 14px;
+  background: #1a1a1e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 5;
+  animation: content-in-soft 0.18s var(--ease) both;
+}
+
+.device-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--muted);
+}
+
+.device-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.device-item.on {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.device-empty {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--faint);
 }

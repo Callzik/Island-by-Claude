@@ -218,6 +218,18 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       }
       return r(null);
     }
+    case "audio_devices":
+      return r([
+        { id: "a", name: "Динамики (Realtek(R) Audio)", default: state.volume.device === "Динамики" },
+        { id: "b", name: "Наушники (WH-1000XM4)", default: state.volume.device === "Наушники" },
+        { id: "c", name: "LG ULTRAGEAR (NVIDIA High Definition Audio)", default: state.volume.device === "LG ULTRAGEAR" },
+      ]);
+    case "audio_set_device": {
+      const names: Record<string, string> = { a: "Динамики", b: "Наушники", c: "LG ULTRAGEAR" };
+      state.volume = { ...state.volume, device: names[args.id as string] ?? "Динамики" };
+      mockEmit("volume", state.volume);
+      return r(true);
+    }
     case "open_launcher":
       mockEmit("launcher", true);
       return r(null);

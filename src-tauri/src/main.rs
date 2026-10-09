@@ -122,6 +122,8 @@ struct AppItem {
 enum AudioCmd {
     Volume(f32),
     Mute(bool),
+    List(Sender<Vec<native::audio::OutputDevice>>),
+    SetDevice(String, Sender<bool>),
 }
 
 struct MediaCmd {
@@ -596,6 +598,12 @@ fn spawn_audio_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<AudioCmd
                     match cmd {
                         AudioCmd::Volume(v) => audio.set_volume(v),
                         AudioCmd::Mute(m) => audio.set_mute(m),
+                        AudioCmd::List(reply) => {
+                            let _ = reply.send(audio.outputs());
+                        }
+                        AudioCmd::SetDevice(id, reply) => {
+                            let _ = reply.send(audio.set_default(&id));
+                        }
                     }
                     dirty = true;
                 }
@@ -1051,6 +1059,25 @@ fn volume_set(state: St<'_>, level: f32) {
 #[tauri::command]
 fn volume_mute(state: St<'_>, muted: bool) {
     let _ = lock(&state.audio_tx).send(AudioCmd::Mute(muted));
+}
+
+/// Active output devices (for the "Динамики ⌄" menu).
+#[tauri::command]
+async fn audio_devices(state: St<'_>) -> Result<Vec<native::audio::OutputDevice>, String> {
+    let (tx, rx) = channel();
+    lock(&state.audio_tx).send(AudioCmd::List(tx)).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(3)).unwrap_or_default())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn audio_set_device(state: St<'_>, id: String) -> Result<bool, String> {
+    let (tx, rx) = channel();
+    lock(&state.audio_tx).send(AudioCmd::SetDevice(id, tx)).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(5)).unwrap_or(false))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1968,6 +1995,8 @@ fn main() {
             media_control,
             volume_set,
             volume_mute,
+            audio_devices,
+            audio_set_device,
             list_apps,
             get_icons,
             open_target,

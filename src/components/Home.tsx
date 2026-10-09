@@ -4,7 +4,7 @@ import { css } from "../lib/color";
 import { clock } from "../lib/format";
 import { useIcon } from "../lib/icons";
 import { Cover } from "./Compact";
-import { ICommand, IEraser, IFullscreen, IMic, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose } from "./Icons";
+import { ICheck, IChevron, ICommand, IEraser, IFullscreen, IMic, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose } from "./Icons";
 import type { PanelProps } from "./Panel";
 
 function useTicker(active: boolean, ms = 250) {
@@ -76,6 +76,54 @@ function MediaCard({ media, mediaAt, cover, accent }: Pick<PanelProps, "media" |
   );
 }
 
+interface OutputDevice {
+  id: string;
+  name: string;
+  default: boolean;
+}
+
+/** "Динамики ⌄": switch the default output device. */
+function DeviceMenu({ volume, setBusy }: Pick<PanelProps, "volume" | "setBusy">) {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<OutputDevice[] | null>(null);
+  const toggle = async () => {
+    if (open) {
+      setOpen(false);
+      setBusy(false);
+      return;
+    }
+    setOpen(true);
+    setBusy(true);
+    setList(await call<OutputDevice[]>("audio_devices").catch(() => []));
+  };
+  const pick = async (d: OutputDevice) => {
+    setOpen(false);
+    setBusy(false);
+    if (!d.default) await call("audio_set_device", { id: d.id });
+  };
+  return (
+    <div className="device-menu">
+      <button className={`device-chip ${open ? "open" : ""}`} title={volume.device} onClick={toggle}>
+        <ISpeaker size={15} />
+        <span className="device-name">{volume.device}</span>
+        <IChevron size={13} />
+      </button>
+      {open && (
+        <div className="device-pop">
+          {list === null && <div className="device-empty">Загружаю…</div>}
+          {list?.length === 0 && <div className="device-empty">Устройств не найдено</div>}
+          {list?.map((d) => (
+            <button key={d.id} className={`device-item ${d.default ? "on" : ""}`} onClick={() => pick(d)} title={d.name}>
+              <span>{d.name}</span>
+              {d.default && <ICheck size={14} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function VolumeRow({ volume, setBusy }: Pick<PanelProps, "volume" | "setBusy">) {
   const [local, setLocal] = useState<number | null>(null);
   const last = useRef(0);
@@ -113,12 +161,7 @@ function VolumeRow({ volume, setBusy }: Pick<PanelProps, "volume" | "setBusy">) 
         }}
       />
       <span className="volume-value">{level}</span>
-      {volume.device && (
-        <span className="device-chip" title={volume.device}>
-          <ISpeaker size={15} />
-          {volume.device}
-        </span>
-      )}
+      {volume.device && <DeviceMenu volume={volume} setBusy={setBusy} />}
     </div>
   );
 }

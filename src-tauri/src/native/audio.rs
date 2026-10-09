@@ -1,13 +1,65 @@
 //! Default output device: peak meter (for the liquid wave), master volume, name.
 
-use windows::core::Result;
+use windows::core::{Result, GUID};
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioMeterInformation};
-use windows::Win32::Media::Audio::{eConsole, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator};
-use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, STGM_READ};
+use windows::Win32::Media::Audio::{
+    eCommunications, eConsole, eMultimedia, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
+    DEVICE_STATE_ACTIVE,
+};
 use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, STGM_READ};
 
-use super::util::take_pwstr;
+use super::util::{pcwstr, take_pwstr, wide};
+
+#[allow(non_snake_case, dead_code)]
+mod policy {
+    use std::ffi::c_void;
+    use windows::core::{interface, IUnknown, IUnknown_Vtbl, HRESULT, PCWSTR};
+    use windows::Win32::Media::Audio::ERole;
+
+    /// Undocumented (but stable since Windows 7) interface used by the Sound control
+    /// panel to change the default endpoint. Only `SetDefaultEndpoint` is called;
+    /// the other slots just keep the vtable layout.
+    #[interface("f8679f50-850a-41cf-9c72-430f290290c8")]
+    pub unsafe trait IPolicyConfig: IUnknown {
+        pub fn GetMixFormat(&self, id: PCWSTR, fmt: *mut *mut c_void) -> HRESULT;
+        pub fn GetDeviceFormat(&self, id: PCWSTR, default: i32, fmt: *mut *mut c_void) -> HRESULT;
+        pub fn ResetDeviceFormat(&self, id: PCWSTR) -> HRESULT;
+        pub fn SetDeviceFormat(&self, id: PCWSTR, endpoint: *mut c_void, mix: *mut c_void) -> HRESULT;
+        pub fn GetProcessingPeriod(&self, id: PCWSTR, default: i32, def: *mut i64, min: *mut i64) -> HRESULT;
+        pub fn SetProcessingPeriod(&self, id: PCWSTR, period: *mut i64) -> HRESULT;
+        pub fn GetShareMode(&self, id: PCWSTR, mode: *mut c_void) -> HRESULT;
+        pub fn SetShareMode(&self, id: PCWSTR, mode: *mut c_void) -> HRESULT;
+        pub fn GetPropertyValue(&self, id: PCWSTR, key: *const c_void, value: *mut c_void) -> HRESULT;
+        pub fn SetPropertyValue(&self, id: PCWSTR, key: *const c_void, value: *mut c_void) -> HRESULT;
+        pub fn SetDefaultEndpoint(&self, id: PCWSTR, role: ERole) -> HRESULT;
+        pub fn SetEndpointVisibility(&self, id: PCWSTR, visible: i32) -> HRESULT;
+    }
+
+}
+use policy::IPolicyConfig;
+
+const CLSID_POLICY_CONFIG: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
+
+#[derive(serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputDevice {
+    pub id: String,
+    pub name: String,
+    pub default: bool,
+}
+
+fn friendly_name(device: &IMMDevice) -> String {
+    unsafe {
+        device
+            .OpenPropertyStore(STGM_READ)
+            .and_then(|store| store.GetValue(&PKEY_Device_FriendlyName))
+            .and_then(|pv| PropVariantToStringAlloc(&pv))
+            .map(take_pwstr)
+            .unwrap_or_default()
+    }
+}
 
 pub struct Audio {
     enumerator: IMMDeviceEnumerator,
@@ -51,15 +103,43 @@ impl Audio {
         self.device_id = id;
         self.meter = unsafe { device.Activate::<IAudioMeterInformation>(CLSCTX_ALL, None) }.ok();
         self.volume = unsafe { device.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None) }.ok();
-        self.device_name = unsafe {
-            device
-                .OpenPropertyStore(STGM_READ)
-                .and_then(|store| store.GetValue(&PKEY_Device_FriendlyName))
-                .and_then(|pv| PropVariantToStringAlloc(&pv))
-                .map(take_pwstr)
-                .unwrap_or_default()
-        };
+        self.device_name = friendly_name(&device);
         true
+    }
+
+    /// Active output devices (speakers, headphones, HDMI…).
+    pub fn outputs(&self) -> Vec<OutputDevice> {
+        let mut out = Vec::new();
+        unsafe {
+            let Ok(list) = self.enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) else { return out };
+            let n = list.GetCount().unwrap_or(0);
+            for i in 0..n {
+                if let Ok(d) = list.Item(i) {
+                    let id = d.GetId().map(take_pwstr).unwrap_or_default();
+                    out.push(OutputDevice {
+                        default: id == self.device_id,
+                        name: friendly_name(&d),
+                        id,
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// Makes `id` the default device for every role.
+    pub fn set_default(&mut self, id: &str) -> bool {
+        let w = wide(id);
+        let ok = unsafe {
+            match CoCreateInstance::<_, IPolicyConfig>(&CLSID_POLICY_CONFIG, None, CLSCTX_ALL) {
+                Ok(pc) => [eConsole, eMultimedia, eCommunications]
+                    .into_iter()
+                    .all(|role| pc.SetDefaultEndpoint(pcwstr(&w), role).is_ok()),
+                Err(_) => false,
+            }
+        };
+        self.refresh();
+        ok
     }
 
     pub fn peak(&self) -> f32 {
