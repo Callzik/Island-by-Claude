@@ -26,6 +26,11 @@ export interface Settings {
   weatherCity: string;
   weatherLat: number;
   weatherLon: number;
+  voiceEnabled: boolean;
+  hotkeyVoice: string;
+  voiceWhisperUrl: string;
+  voiceWhisperKey: string;
+  voiceWhisperModel: string;
 }
 
 export interface ShelfItem {

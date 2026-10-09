@@ -10,8 +10,11 @@ export function mockEmit(event: string, payload: unknown) {
 
 export async function mockListen<T>(event: string, cb: (p: T) => void): Promise<() => void> {
   if (!handlers.has(event)) handlers.set(event, new Set());
-  handlers.get(event)!.add(cb as Handler);
-  return () => handlers.get(event)?.delete(cb as Handler);
+  // a fresh wrapper per subscription: StrictMode subscribes the same setter twice,
+  // and the first (async) unsubscribe must not remove the second one
+  const h: Handler = (p) => cb(p as T);
+  handlers.get(event)!.add(h);
+  return () => handlers.get(event)?.delete(h);
 }
 
 const now = Date.now();
@@ -38,6 +41,11 @@ const state = {
     weatherCity: "Москва",
     weatherLat: 55.75,
     weatherLon: 37.62,
+    voiceEnabled: true,
+    hotkeyVoice: "Ctrl+Alt+Space",
+    voiceWhisperUrl: "",
+    voiceWhisperKey: "",
+    voiceWhisperModel: "whisper-1",
   },
   data: {
     shelf: [
@@ -188,6 +196,27 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       ]);
     case "weather_locate":
       return r({ name: "Санкт-Петербург", area: "Россия", lat: 59.94, lon: 30.31 });
+    case "voice": {
+      const a = args.action as string;
+      const w = window as any;
+      if ((a === "start" || a === "toggle") && !w.__voiceT) {
+        mockEmit("voice", { state: "recording", startedMs: Date.now() });
+        let t = 0;
+        w.__voiceT = setInterval(() => mockEmit("voice-level", Math.abs(Math.sin((t += 0.4)) * 0.7 + Math.random() * 0.3)), 50);
+      } else if (w.__voiceT) {
+        clearInterval(w.__voiceT);
+        w.__voiceT = 0;
+        if (a === "cancel") mockEmit("voice", { state: "idle", startedMs: 0 });
+        else {
+          mockEmit("voice", { state: "processing", startedMs: Date.now() });
+          setTimeout(() => {
+            mockEmit("voice", { state: "idle", startedMs: 0 });
+            mockEmit("toast", { icon: "mic", title: "Вставлено · 42 симв.", subtitle: "Созвон переносим на завтра, на 11 утра", ms: 3000 });
+          }, 900);
+        }
+      }
+      return r(null);
+    }
     case "open_launcher":
       mockEmit("launcher", true);
       return r(null);

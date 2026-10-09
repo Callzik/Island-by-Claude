@@ -370,6 +370,50 @@ export function SettingsTab({
         <div className="setting setting-wide city-setting">
           <CityPicker settings={settings} save={save} setBusy={setBusy} />
         </div>
+
+        <div className="settings-section">Голос → текст</div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Диктовка</div>
+            <div className="setting-sub">Текст вставляется туда, где вы печатали</div>
+          </div>
+          <Toggle checked={settings.voiceEnabled} onChange={(v) => set("voiceEnabled", v)} />
+        </div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Сочетание клавиш</div>
+            <div className="setting-sub">Начать / закончить запись</div>
+          </div>
+          <HotkeyField value={settings.hotkeyVoice} onChange={(v) => set("hotkeyVoice", v)} setBusy={setBusy} />
+        </div>
+        <div className="setting setting-wide">
+          <div>
+            <div className="setting-title">Whisper (необязательно)</div>
+            <div className="setting-sub">Адрес …/audio/transcriptions. Пусто — распознавание Windows, офлайн</div>
+          </div>
+          <TextField
+            value={settings.voiceWhisperUrl}
+            onSave={(v) => set("voiceWhisperUrl", v)}
+            setBusy={setBusy}
+            placeholder="http://localhost:8000/v1/audio/transcriptions"
+          />
+        </div>
+        {settings.voiceWhisperUrl && (
+          <>
+            <div className="setting">
+              <div>
+                <div className="setting-title">Модель Whisper</div>
+              </div>
+              <TextField value={settings.voiceWhisperModel} onSave={(v) => set("voiceWhisperModel", v || "whisper-1")} setBusy={setBusy} placeholder="whisper-1" />
+            </div>
+            <div className="setting">
+              <div>
+                <div className="setting-title">Ключ Whisper</div>
+              </div>
+              <TextField value={settings.voiceWhisperKey} onSave={(v) => set("voiceWhisperKey", v)} setBusy={setBusy} placeholder="необязательно" secret />
+            </div>
+          </>
+        )}
       </div>
       <div className="settings-foot">
         <span className="muted">Island {version} · Alt+Space — лаунчер · перетащите файл на остров — полка</span>

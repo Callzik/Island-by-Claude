@@ -5,6 +5,7 @@ mod ai;
 mod clips;
 mod native;
 mod store;
+mod voice;
 mod weather;
 
 use std::collections::HashMap;
@@ -191,6 +192,24 @@ struct Shared {
     ai_gen: AtomicU32,
     weather: Mutex<Option<weather::WeatherPayload>>,
     weather_wake: Mutex<Sender<()>>,
+    voice_tx: Mutex<Sender<VoiceCmd>>,
+    voice_active: AtomicBool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum VoiceCmd {
+    Toggle,
+    Start,
+    Stop,
+    Cancel,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct VoiceState {
+    /// "idle" | "recording" | "processing"
+    state: String,
+    started_ms: i64,
 }
 
 /// A monitor snapshot (physical pixels, top-down BGRA).
@@ -299,6 +318,9 @@ fn hotkey_bindings(s: &Settings) -> Vec<(&'static str, String)> {
         v.push(("region", s.hotkey_region.clone()));
         v.push(("ocr", s.hotkey_ocr.clone()));
     }
+    if s.voice_enabled {
+        v.push(("voice", s.hotkey_voice.clone()));
+    }
     v.retain(|(_, c)| !c.trim().is_empty());
     v
 }
@@ -307,6 +329,9 @@ fn run_hotkey(app: &AppHandle, action: &str) {
     match action {
         "launcher" => toggle_launcher(app),
         "region" | "ocr" => begin_capture(app.clone(), action.to_string()),
+        "voice" => {
+            let _ = lock(&app.state::<Arc<Shared>>().voice_tx).send(VoiceCmd::Toggle);
+        }
         _ => {}
     }
 }
@@ -687,6 +712,142 @@ fn spawn_weather_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<()>) {
         .expect("failed to start weather thread");
 }
 
+fn voice_state(app: &AppHandle, state: &str, started_ms: i64) {
+    let _ = app.emit_to(
+        EventTarget::webview_window("main"),
+        "voice",
+        VoiceState {
+            state: state.into(),
+            started_ms,
+        },
+    );
+}
+
+/// Pastes recognised text into the window the user was working in.
+fn paste_into_last(shared: &Shared, text: &str) -> bool {
+    if !clip::write_text(text) {
+        return false;
+    }
+    shared.clip_skip_seq.store(clip::sequence(), Ordering::Relaxed);
+    thread::sleep(Duration::from_millis(40));
+    input::activate(shared.last_fg.load(Ordering::Relaxed));
+    thread::sleep(Duration::from_millis(120));
+    input::send_paste();
+    true
+}
+
+/// Voice → text. The microphone stream lives on this thread (cpal streams are
+/// not Send); Windows dictation (WinRT) needs MTA, which this thread is.
+fn spawn_voice_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<VoiceCmd>) {
+    thread::Builder::new()
+        .name("voice".into())
+        .spawn(move || {
+            let _com = util::Com::mta();
+            const LIMIT: Duration = Duration::from_secs(120);
+            for cmd in rx.iter() {
+                if !matches!(cmd, VoiceCmd::Start | VoiceCmd::Toggle) {
+                    continue;
+                }
+                let s = lock(&shared.settings).clone();
+                if !s.voice_enabled {
+                    continue;
+                }
+                let rec = match voice::Recorder::start() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        toast_error(&app, "Нет записи", &e);
+                        continue;
+                    }
+                };
+                let use_whisper = !s.voice_whisper_url.trim().is_empty();
+                let mut dict = None;
+                let mut dict_err = None;
+                if !use_whisper {
+                    match native::speech::Dictation::start() {
+                        Ok(d) => dict = Some(d),
+                        Err(e) => dict_err = Some(e.message().to_string()),
+                    }
+                }
+                shared.voice_active.store(true, Ordering::Relaxed);
+                let started = store::now_ms();
+                let t0 = Instant::now();
+                voice_state(&app, "recording", started);
+
+                // record until ■ / × / hotkey again / time limit
+                let mut outcome = VoiceCmd::Stop;
+                loop {
+                    match rx.recv_timeout(Duration::from_millis(40)) {
+                        Ok(VoiceCmd::Stop) | Ok(VoiceCmd::Toggle) => break,
+                        Ok(VoiceCmd::Cancel) => {
+                            outcome = VoiceCmd::Cancel;
+                            break;
+                        }
+                        Ok(VoiceCmd::Start) => {}
+                        Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => return,
+                    }
+                    let _ = app.emit_to(EventTarget::webview_window("main"), "voice-level", rec.level());
+                    if t0.elapsed() >= LIMIT {
+                        break;
+                    }
+                }
+                let samples = rec.finish();
+                let _ = app.emit_to(EventTarget::webview_window("main"), "voice-level", 0.0f32);
+                if outcome == VoiceCmd::Cancel {
+                    if let Some(d) = dict {
+                        d.cancel();
+                    }
+                    shared.voice_active.store(false, Ordering::Relaxed);
+                    voice_state(&app, "idle", 0);
+                    continue;
+                }
+
+                voice_state(&app, "processing", started);
+                let text = if use_whisper {
+                    let wav = voice::wav(&samples, voice::RATE);
+                    tauri::async_runtime::block_on(voice::whisper(
+                        &s.voice_whisper_url,
+                        &s.voice_whisper_key,
+                        &s.voice_whisper_model,
+                        wav,
+                    ))
+                } else if let Some(d) = dict {
+                    Ok(d.finish())
+                } else {
+                    Err(format!(
+                        "Распознавание Windows недоступно ({}). Укажите адрес Whisper в настройках",
+                        dict_err.unwrap_or_default()
+                    ))
+                };
+                shared.voice_active.store(false, Ordering::Relaxed);
+                voice_state(&app, "idle", 0);
+                match text {
+                    Ok(t) if !t.trim().is_empty() => {
+                        let t = t.trim().to_string();
+                        let n = t.chars().count();
+                        if paste_into_last(&shared, &t) {
+                            toast(
+                                &app,
+                                ToastPayload {
+                                    icon: "mic".into(),
+                                    title: format!("Вставлено · {n} симв."),
+                                    subtitle: Some(t.chars().take(60).collect()),
+                                    ms: Some(3000),
+                                    ..Default::default()
+                                },
+                            );
+                        } else {
+                            toast_error(&app, "Не удалось вставить текст", "");
+                        }
+                    }
+                    Ok(_) => toast_error(&app, "Ничего не расслышал", "Попробуйте ещё раз, ближе к микрофону"),
+                    Err(e) => toast_error(&app, "Не удалось распознать", &e),
+                }
+            }
+        })
+        .expect("failed to start voice thread");
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -738,6 +899,9 @@ fn save_settings(app: AppHandle, state: St<'_>, settings: Settings) -> Result<Se
     }
     if next.hotkey_ocr.trim().is_empty() {
         next.hotkey_ocr = old.hotkey_ocr.clone();
+    }
+    if next.hotkey_voice.trim().is_empty() {
+        next.hotkey_voice = old.hotkey_voice.clone();
     }
     let failed_before = lock(&state.hotkey_error).is_some();
     if hotkey_bindings(&next) != hotkey_bindings(&old) || failed_before {
@@ -1535,6 +1699,17 @@ fn weather_refresh(state: St<'_>) {
 }
 
 #[tauri::command]
+fn voice(state: St<'_>, action: String) {
+    let cmd = match action.as_str() {
+        "start" => VoiceCmd::Start,
+        "stop" => VoiceCmd::Stop,
+        "cancel" => VoiceCmd::Cancel,
+        _ => VoiceCmd::Toggle,
+    };
+    let _ = lock(&state.voice_tx).send(cmd);
+}
+
+#[tauri::command]
 fn chat_load(state: St<'_>) -> serde_json::Value {
     let v: serde_json::Value = load_json(&state.paths.chat());
     if v.is_array() {
@@ -1628,6 +1803,7 @@ fn main() {
             let (media_tx, media_rx) = channel();
             let (audio_tx, audio_rx) = channel();
             let (weather_tx, weather_rx) = channel();
+            let (voice_tx, voice_rx) = channel();
 
             let shared = Arc::new(Shared {
                 paths,
@@ -1658,6 +1834,8 @@ fn main() {
                 ai_gen: AtomicU32::new(0),
                 weather: Mutex::new(None),
                 weather_wake: Mutex::new(weather_tx),
+                voice_tx: Mutex::new(voice_tx),
+                voice_active: AtomicBool::new(false),
             });
             app.manage(shared.clone());
 
@@ -1689,6 +1867,7 @@ fn main() {
             spawn_audio_thread(app.handle().clone(), shared.clone(), audio_rx);
             spawn_clip_thread(app.handle().clone(), shared.clone());
             spawn_weather_thread(app.handle().clone(), shared.clone(), weather_rx);
+            spawn_voice_thread(app.handle().clone(), shared.clone(), voice_rx);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1733,6 +1912,7 @@ fn main() {
             weather_search,
             weather_locate,
             weather_refresh,
+            voice,
             quit
         ])
         .run(tauri::generate_context!())

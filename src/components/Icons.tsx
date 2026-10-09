@@ -61,6 +61,12 @@ export const ISun = (p: P) => (
     <path d="M12 3.5v1.8M12 18.7v1.8M3.5 12h1.8M18.7 12h1.8M6 6l1.3 1.3M16.7 16.7 18 18M6 18l1.3-1.3M16.7 7.3 18 6" />
   </Svg>
 );
+export const IMic = (p: P) => (
+  <Svg {...p}>
+    <rect x="9" y="3.5" width="6" height="11" rx="3" />
+    <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" />
+  </Svg>
+);
 export const IClipboard = (p: P) => (
   <Svg {...p}>
     <rect x="5" y="4.5" width="14" height="16" rx="2.5" />

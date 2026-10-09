@@ -25,8 +25,9 @@ import { Launcher } from "./components/Launcher";
 import { useLyrics } from "./lib/useLyrics";
 import { rainSoon, sky, deg, type WeatherPayload } from "./lib/weather";
 import { WeatherCompact } from "./components/Weather";
+import { VoicePill, type VoiceState } from "./components/VoicePill";
 
-type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher";
+type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher" | "voice";
 
 const BOX: Record<Exclude<Mode, "launcher">, { w: number; h: number; r: number }> = {
   hidden: { w: 0, h: 0, r: 0 },
@@ -36,6 +37,7 @@ const BOX: Record<Exclude<Mode, "launcher">, { w: number; h: number; r: number }
   toast: { w: 400, h: 66, r: 27 },
   drop: { w: 600, h: 160, r: 30 },
   panel: { w: 820, h: 440, r: 30 },
+  voice: { w: 330, h: 46, r: 23 },
 };
 
 const LAUNCHER_W = 680;
@@ -66,6 +68,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   const [tab, setTab] = useState<Tab>("home");
   const [ask, setAsk] = useState<{ text: string; n: number } | null>(null);
   const [weather, setWeather] = useState<WeatherPayload | null>(boot.weather ?? null);
+  const [voice, setVoice] = useState<VoiceState>({ state: "idle", startedMs: 0 });
   const chatDrop = useRef<((paths: string[]) => void) | null>(null);
   const setChatDrop = useCallback((fn: ((paths: string[]) => void) | null) => {
     chatDrop.current = fn;
@@ -80,11 +83,13 @@ export default function App({ boot }: { boot: InitPayload }) {
 
   // latest values for long-lived event listeners
   const live = useRef({ panelOpen, pinned, launcherOpen, drop, settings, media, armed: true, lmb: false, busy: false, toastActions: false, tab: "home" as Tab });
-  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media, toastActions: !!toast?.actions?.length, tab };
+  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media, toastActions: !!toast?.actions?.length || voice.state !== "idle", tab };
 
   const mode: Mode = suppressed
     ? "hidden"
-    : launcherOpen
+    : voice.state !== "idle"
+      ? "voice"
+      : launcherOpen
       ? "launcher"
       : drop
         ? "drop"
@@ -169,6 +174,8 @@ export default function App({ boot }: { boot: InitPayload }) {
     const music = !!media?.playing;
     const rimFor = (): LiquidTarget["rim"] => {
       switch (mode) {
+        case "voice":
+          return [255, 77, 77, 0.95];
         case "music":
         case "peek":
           return [accent[0], accent[1], accent[2], 0.95];
@@ -347,6 +354,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<boolean>("suppressed", setSuppressed));
     subs.push(on<ToastData>("toast", (t) => showToast(t, t.ms ?? 3000)));
     subs.push(on<WeatherPayload>("weather", setWeather));
+    subs.push(on<VoiceState>("voice", setVoice));
     subs.push(
       on<boolean>("launcher", (open) => {
         if (open) openLauncher();
@@ -445,6 +453,8 @@ export default function App({ boot }: { boot: InitPayload }) {
 
   const content = useMemo(() => {
     switch (mode) {
+      case "voice":
+        return <VoicePill voice={voice} />;
       case "idle":
         return weather && settings.weatherEnabled ? <WeatherCompact weather={weather} /> : null;
       case "music":
@@ -505,10 +515,10 @@ export default function App({ boot }: { boot: InitPayload }) {
       default:
         return null;
     }
-  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather]);
+  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather, voice]);
 
   const onIslandClick = () => {
-    if (mode === "toast" && toast?.actions?.length) return;
+    if ((mode === "toast" && toast?.actions?.length) || mode === "voice") return;
     if (mode === "idle" || mode === "music" || mode === "peek" || mode === "toast") openPanel("home", true);
   };
 

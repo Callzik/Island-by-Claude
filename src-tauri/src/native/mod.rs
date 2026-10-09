@@ -7,4 +7,5 @@ pub mod img;
 pub mod input;
 pub mod media;
 pub mod shell;
+pub mod speech;
 pub mod util;

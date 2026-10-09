@@ -68,6 +68,12 @@ pub struct Settings {
     pub weather_city: String,
     pub weather_lat: f64,
     pub weather_lon: f64,
+    /// Voice → text: hotkey, optional Whisper-compatible endpoint (else Windows speech).
+    pub voice_enabled: bool,
+    pub hotkey_voice: String,
+    pub voice_whisper_url: String,
+    pub voice_whisper_key: String,
+    pub voice_whisper_model: String,
 }
 
 impl Default for Settings {
@@ -91,6 +97,11 @@ impl Default for Settings {
             weather_city: String::new(),
             weather_lat: 0.0,
             weather_lon: 0.0,
+            voice_enabled: true,
+            hotkey_voice: "Ctrl+Alt+Space".into(),
+            voice_whisper_url: String::new(),
+            voice_whisper_key: String::new(),
+            voice_whisper_model: "whisper-1".into(),
         }
     }
 }

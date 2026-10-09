@@ -2177,3 +2177,111 @@ html.is-overlay body {
 .city-list span {
   color: var(--muted);
 }
+
+/* ------------------------------------------------------------------- voice */
+
+.voice {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 3px 10px;
+}
+
+.voice-mic {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #ff4d4d;
+  color: #fff;
+  flex-shrink: 0;
+  animation: mic-pulse 1.4s ease-in-out infinite;
+}
+
+.voice.busy .voice-mic {
+  animation: none;
+  background: var(--raised);
+  color: var(--muted);
+}
+
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(255, 77, 77, 0);
+  }
+}
+
+.voice-bars {
+  flex: 1;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  min-width: 0;
+}
+
+.voice-bars i {
+  flex: 1;
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  transform: scaleY(0.12);
+  transition: transform 0.08s linear;
+}
+
+.voice.busy .voice-bars i {
+  background: var(--faint);
+}
+
+.voice-time {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  min-width: 34px;
+  text-align: right;
+}
+
+.voice-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.voice-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.voice-btn.done {
+  background: #fff;
+  color: #111;
+}
+
+.dock-mic {
+  margin-left: auto;
+  height: 40px;
+  padding: 0 14px 0 12px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.dock-mic:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}

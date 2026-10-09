@@ -1,6 +1,6 @@
 import { call } from "../api";
 import { WeatherIcon } from "./WeatherIcon";
-import { IAlert, ICheck, ICopy, IImage, IInbox, ILauncher, IPipette, IQr, IText } from "./Icons";
+import { IAlert, ICheck, ICopy, IImage, IInbox, ILauncher, IMic, IPipette, IQr, IText } from "./Icons";
 
 export interface ToastAction {
   label: string;
@@ -9,7 +9,7 @@ export interface ToastAction {
 }
 
 export interface ToastData {
-  icon: "shelf" | "launcher" | "copy" | "check" | "error" | "image" | "text" | "qr" | "color" | "rain";
+  icon: "shelf" | "launcher" | "copy" | "check" | "error" | "image" | "text" | "qr" | "color" | "rain" | "mic";
   /** weather code for the "rain" icon */
   wx?: number;
   title: string;
@@ -24,7 +24,7 @@ export interface ToastData {
   ms?: number;
 }
 
-const ICONS = { shelf: IInbox, launcher: ILauncher, copy: ICopy, check: ICheck, error: IAlert, image: IImage, text: IText, qr: IQr, color: IPipette };
+const ICONS = { shelf: IInbox, launcher: ILauncher, copy: ICopy, check: ICheck, error: IAlert, image: IImage, text: IText, qr: IQr, color: IPipette, mic: IMic };
 
 export function Toast({ data, onDone }: { data: ToastData; onDone?: () => void }) {
   const Icon = (ICONS as Record<string, typeof ICheck>)[data.icon] ?? ICheck;

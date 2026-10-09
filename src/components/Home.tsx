@@ -4,7 +4,7 @@ import { css } from "../lib/color";
 import { clock } from "../lib/format";
 import { useIcon } from "../lib/icons";
 import { Cover } from "./Compact";
-import { ICommand, IEraser, IFullscreen, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose } from "./Icons";
+import { ICommand, IEraser, IFullscreen, IMic, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose } from "./Icons";
 import type { PanelProps } from "./Panel";
 
 function useTicker(active: boolean, ms = 250) {
@@ -216,6 +216,19 @@ export function Home(p: PanelProps) {
         <button className="dock-add" onClick={addPins} title="Добавить программу или файл">
           <IPlus size={18} />
         </button>
+        {p.settings.voiceEnabled && (
+          <button
+            className="dock-mic"
+            title={`Голос → текст · ${p.settings.hotkeyVoice}`}
+            onClick={() => {
+              p.onClose();
+              window.setTimeout(() => call("voice", { action: "start" }), 200);
+            }}
+          >
+            <IMic size={18} />
+            <span>Диктовка</span>
+          </button>
+        )}
         {p.pins.length === 0 && <span className="dock-hint">Перетащите ярлык на остров → «В лаунчер»</span>}
       </div>
     </div>
