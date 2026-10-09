@@ -119,15 +119,34 @@ function toData(it: Item): LyricsData {
   };
 }
 
-/** null = nothing found. Throws on network errors (not cached). */
+function useful(it: Item | null | undefined): it is Item {
+  return !!it && !!(it.syncedLyrics || it.plainLyrics || it.instrumental);
+}
+
+/** Resolves with the first non-null result, or null when every task gives null. */
+function firstValid<T>(tasks: Promise<T | null>[]): Promise<T | null> {
+  return new Promise((resolve) => {
+    let left = tasks.length;
+    if (!left) return resolve(null);
+    for (const t of tasks) {
+      t.then((v) => {
+        if (v) resolve(v);
+        else if (--left === 0) resolve(null);
+      });
+    }
+  });
+}
+
+/** null = nothing found. Throws when the request was aborted. */
 export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<LyricsData | null> {
   const key = lyricsKey(q);
   if (cache.has(key)) return cache.get(key)!;
 
   const title = cleanTitle(q.title) || q.title;
   const artist = firstArtist(q.artist) || q.artist;
-  let found: Item | null = null;
 
+  // all lookups run at the same time — the first useful answer wins
+  const tasks: Promise<Item | null>[] = [];
   if (q.album && q.durationMs > 0) {
     const p = new URLSearchParams({
       artist_name: q.artist,
@@ -135,21 +154,15 @@ export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<
       album_name: q.album,
       duration: String(Math.round(q.durationMs / 1000)),
     });
-    const it = (await getJson(`${BASE}/get?${p}`, signal)) as Item | null;
-    if (it && (it.syncedLyrics || it.plainLyrics || it.instrumental)) found = it;
+    tasks.push(getJson(`${BASE}/get?${p}`, signal).then((it) => (useful(it as Item) ? (it as Item) : null)));
   }
+  const search = (p: URLSearchParams) =>
+    getJson(`${BASE}/search?${p}`, signal).then((l) => (Array.isArray(l) ? pick(l as Item[], q.durationMs) : null));
+  tasks.push(search(new URLSearchParams({ track_name: title, artist_name: artist })));
+  tasks.push(search(new URLSearchParams({ q: `${artist} ${title}` })));
 
-  if (!found) {
-    const p = new URLSearchParams({ track_name: title, artist_name: artist });
-    const list = (await getJson(`${BASE}/search?${p}`, signal)) as Item[] | null;
-    if (Array.isArray(list)) found = pick(list, q.durationMs);
-  }
-
-  if (!found) {
-    const p = new URLSearchParams({ q: `${artist} ${title}` });
-    const list = (await getJson(`${BASE}/search?${p}`, signal)) as Item[] | null;
-    if (Array.isArray(list)) found = pick(list, q.durationMs);
-  }
+  const found = await firstValid(tasks.map((t) => t.catch(() => null)));
+  if (signal.aborted) throw new DOMException("aborted", "AbortError");
 
   const data = found ? toData(found) : null;
   cache.set(key, data);

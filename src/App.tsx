@@ -22,6 +22,7 @@ import { Toast, type ToastData } from "./components/Toast";
 import { DropZones, type DropZone } from "./components/DropZones";
 import { Panel, type Tab } from "./components/Panel";
 import { Launcher } from "./components/Launcher";
+import { useLyrics } from "./lib/useLyrics";
 
 type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher";
 
@@ -36,6 +37,7 @@ const BOX: Record<Exclude<Mode, "launcher">, { w: number; h: number; r: number }
 };
 
 const LAUNCHER_W = 680;
+const MUSIC_LYRICS_W = 470;
 
 export default function App({ boot }: { boot: InitPayload }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -92,7 +94,15 @@ export default function App({ boot }: { boot: InitPayload }) {
     ghostRef.current = { mode, node: innerRef.current ? innerRef.current.cloneNode(true) : null };
   }
 
-  const box = mode === "launcher" ? { w: LAUNCHER_W, h: launcherH, r: 26 } : BOX[mode];
+  const lyrics = useLyrics(media);
+  const lyricsInIsland = mode === "music" && !!lyrics.lines;
+
+  const box =
+    mode === "launcher"
+      ? { w: LAUNCHER_W, h: launcherH, r: 26 }
+      : lyricsInIsland
+        ? { ...BOX.music, w: MUSIC_LYRICS_W }
+        : BOX[mode];
 
   useLayoutEffect(() => {
     const node = ghostRef.current.node as HTMLElement | null;
@@ -387,7 +397,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   const content = useMemo(() => {
     switch (mode) {
       case "music":
-        return <Compact cover={cover.url} />;
+        return <Compact cover={cover.url} media={media} mediaAt={mediaAt} lyrics={lyrics} />;
       case "peek":
         return media ? <Peek media={media} cover={cover.url} /> : null;
       case "toast":
@@ -406,6 +416,7 @@ export default function App({ boot }: { boot: InitPayload }) {
             media={media}
             mediaAt={mediaAt}
             cover={cover.url}
+            lyrics={lyrics}
             accent={accent}
             volume={volume}
             clips={clips}
@@ -437,7 +448,7 @@ export default function App({ boot }: { boot: InitPayload }) {
       default:
         return null;
     }
-  }, [mode, cover.url, media, mediaAt, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, setBusy, bumpUsage]);
+  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, setBusy, bumpUsage]);
 
   const onIslandClick = () => {
     if (mode === "idle" || mode === "music" || mode === "peek" || mode === "toast") openPanel("home", true);

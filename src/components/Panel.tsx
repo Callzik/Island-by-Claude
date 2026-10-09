@@ -7,6 +7,7 @@ import { ClipboardTab } from "./ClipboardTab";
 import { ShelfTab } from "./ShelfTab";
 import { SettingsTab } from "./SettingsTab";
 import type { ToastData } from "./Toast";
+import type { LyricsState } from "../lib/useLyrics";
 
 export type Tab = "home" | "lyrics" | "clipboard" | "shelf" | "settings";
 
@@ -27,6 +28,7 @@ export interface PanelProps {
   media: Media | null;
   mediaAt: number;
   cover: string | null;
+  lyrics: LyricsState;
   accent: RGB;
   volume: Volume;
   clips: Clip[];
@@ -73,7 +75,7 @@ export function Panel(p: PanelProps) {
       </header>
       <section className="panel-body">
         {p.tab === "home" && <Home {...p} />}
-        {p.tab === "lyrics" && <Lyrics media={p.media} mediaAt={p.mediaAt} accent={p.accent} />}
+        {p.tab === "lyrics" && <Lyrics media={p.media} mediaAt={p.mediaAt} accent={p.accent} lyrics={p.lyrics} />}
         {p.tab === "clipboard" && <ClipboardTab clips={p.clips} onClose={p.onClose} toast={p.toast} />}
         {p.tab === "shelf" && <ShelfTab shelf={p.shelf} setShelf={p.setShelf} toast={p.toast} setBusy={p.setBusy} />}
         {p.tab === "settings" && <SettingsTab settings={p.settings} save={p.saveSettings} version={p.version} setBusy={p.setBusy} />}
