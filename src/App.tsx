@@ -23,6 +23,8 @@ import { DropZones, type DropZone } from "./components/DropZones";
 import { Panel, type Tab } from "./components/Panel";
 import { Launcher } from "./components/Launcher";
 import { useLyrics } from "./lib/useLyrics";
+import { rainSoon, sky, deg, type WeatherPayload } from "./lib/weather";
+import { WeatherCompact } from "./components/Weather";
 
 type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher";
 
@@ -63,6 +65,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   const [pinned, setPinned] = useState(false);
   const [tab, setTab] = useState<Tab>("home");
   const [ask, setAsk] = useState<{ text: string; n: number } | null>(null);
+  const [weather, setWeather] = useState<WeatherPayload | null>(boot.weather ?? null);
   const chatDrop = useRef<((paths: string[]) => void) | null>(null);
   const setChatDrop = useCallback((fn: ((paths: string[]) => void) | null) => {
     chatDrop.current = fn;
@@ -124,6 +127,23 @@ export default function App({ boot }: { boot: InitPayload }) {
       node.remove();
     };
   }, [mode]);
+
+  // ---- "Через час дождь" (once per rainy hour) --------------------------------
+  const rainAlerted = useRef(0);
+  useEffect(() => {
+    if (!weather || !settings.weatherEnabled) return;
+    const check = () => {
+      const h = rainSoon(weather);
+      if (!h || rainAlerted.current === h.t) return;
+      rainAlerted.current = h.t;
+      const what = sky(h.code) === "snow" ? "снег" : "дождь";
+      showToast({ icon: "rain", title: `Через час ${what}`, subtitle: `с ${h.label} · ${deg(h.temp)} · ${h.prob}%`, wx: h.code, ms: 6000 });
+    };
+    check();
+    const t = window.setInterval(check, 5 * 60e3);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weather, settings.weatherEnabled]);
 
   // ---- liquid canvas -------------------------------------------------------
   useLayoutEffect(() => {
@@ -326,6 +346,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<Clip[]>("clips", setClips));
     subs.push(on<boolean>("suppressed", setSuppressed));
     subs.push(on<ToastData>("toast", (t) => showToast(t, t.ms ?? 3000)));
+    subs.push(on<WeatherPayload>("weather", setWeather));
     subs.push(
       on<boolean>("launcher", (open) => {
         if (open) openLauncher();
@@ -424,6 +445,8 @@ export default function App({ boot }: { boot: InitPayload }) {
 
   const content = useMemo(() => {
     switch (mode) {
+      case "idle":
+        return weather && settings.weatherEnabled ? <WeatherCompact weather={weather} /> : null;
       case "music":
         return <Compact cover={cover.url} media={media} mediaAt={mediaAt} lyrics={lyrics} />;
       case "peek":
@@ -460,6 +483,7 @@ export default function App({ boot }: { boot: InitPayload }) {
             ask={ask}
             onAsked={clearAsk}
             setDropHandler={setChatDrop}
+            weather={weather}
           />
         );
       case "launcher":
@@ -481,7 +505,7 @@ export default function App({ boot }: { boot: InitPayload }) {
       default:
         return null;
     }
-  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi]);
+  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather]);
 
   const onIslandClick = () => {
     if (mode === "toast" && toast?.actions?.length) return;

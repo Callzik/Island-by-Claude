@@ -22,6 +22,10 @@ export interface Settings {
   aiUrl: string;
   aiKey: string;
   aiModel: string;
+  weatherEnabled: boolean;
+  weatherCity: string;
+  weatherLat: number;
+  weatherLon: number;
 }
 
 export interface ShelfItem {
@@ -106,6 +110,7 @@ export interface InitPayload {
   volume: Volume;
   version: string;
   hotkeyError: string | null;
+  weather?: import("./lib/weather").WeatherPayload | null;
 }
 
 export type DropEvent =

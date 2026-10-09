@@ -160,6 +160,81 @@ function ModelPicker({ settings, save, setBusy }: { settings: Settings; save: (m
   );
 }
 
+interface Place {
+  name: string;
+  area: string;
+  lat: number;
+  lon: number;
+}
+
+function CityPicker({ settings, save, setBusy }: { settings: Settings; save: (s: Settings) => void; setBusy: (b: boolean) => void }) {
+  const [q, setQ] = useState("");
+  const [found, setFound] = useState<Place[] | null>(null);
+  const [busy, setLocal] = useState(false);
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) return setFound(null);
+    const t = window.setTimeout(() => {
+      call<Place[]>("weather_search", { q: query })
+        .then(setFound)
+        .catch(() => setFound([]));
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [q]);
+  const choose = (p: Place) => {
+    save({ ...settings, weatherCity: p.name, weatherLat: p.lat, weatherLon: p.lon });
+    setQ("");
+    setFound(null);
+  };
+  return (
+    <div className="city-picker">
+      <div className="city-row">
+        <input
+          className="field"
+          value={q}
+          placeholder={settings.weatherCity ? `${settings.weatherCity} — найти другой город` : "Определяется по IP · найти город"}
+          spellCheck={false}
+          autoComplete="off"
+          onFocus={() => setBusy(true)}
+          onBlur={() => setBusy(false)}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && found?.[0]) choose(found[0]);
+          }}
+        />
+        <button
+          className="text-btn"
+          disabled={busy}
+          title="Определить по IP-адресу"
+          onClick={async () => {
+            setLocal(true);
+            try {
+              const p = await call<Place>("weather_locate");
+              choose(p);
+            } catch {
+              save({ ...settings, weatherCity: "", weatherLat: 0, weatherLon: 0 });
+            } finally {
+              setLocal(false);
+            }
+          }}
+        >
+          {busy ? "Ищу…" : "Авто"}
+        </button>
+      </div>
+      {found && (
+        <div className="city-list">
+          {found.length === 0 && <div className="hint">Ничего не нашлось</div>}
+          {found.map((p) => (
+            <button key={`${p.lat},${p.lon}`} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(p)}>
+              <b>{p.name}</b> <span>{p.area}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsTab({
   settings,
   save,
@@ -276,6 +351,24 @@ export function SettingsTab({
             <div className="setting-sub">Необязательно · хранится только на этом компьютере</div>
           </div>
           <TextField value={settings.aiKey} onSave={(v) => set("aiKey", v)} setBusy={setBusy} placeholder="sk-…" secret />
+        </div>
+
+        <div className="settings-section">Погода</div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Погода в острове</div>
+            <div className="setting-sub">Температура без музыки, вкладка, «через час дождь»</div>
+          </div>
+          <Toggle checked={settings.weatherEnabled} onChange={(v) => set("weatherEnabled", v)} />
+        </div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Город</div>
+            <div className="setting-sub">{settings.weatherCity || "По IP-адресу"}</div>
+          </div>
+        </div>
+        <div className="setting setting-wide city-setting">
+          <CityPicker settings={settings} save={save} setBusy={setBusy} />
         </div>
       </div>
       <div className="settings-foot">

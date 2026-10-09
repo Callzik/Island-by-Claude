@@ -1,4 +1,5 @@
 import { call } from "../api";
+import { WeatherIcon } from "./WeatherIcon";
 import { IAlert, ICheck, ICopy, IImage, IInbox, ILauncher, IPipette, IQr, IText } from "./Icons";
 
 export interface ToastAction {
@@ -8,7 +9,9 @@ export interface ToastAction {
 }
 
 export interface ToastData {
-  icon: "shelf" | "launcher" | "copy" | "check" | "error" | "image" | "text" | "qr" | "color";
+  icon: "shelf" | "launcher" | "copy" | "check" | "error" | "image" | "text" | "qr" | "color" | "rain";
+  /** weather code for the "rain" icon */
+  wx?: number;
   title: string;
   subtitle?: string;
   tone?: "error";
@@ -24,11 +27,15 @@ export interface ToastData {
 const ICONS = { shelf: IInbox, launcher: ILauncher, copy: ICopy, check: ICheck, error: IAlert, image: IImage, text: IText, qr: IQr, color: IPipette };
 
 export function Toast({ data, onDone }: { data: ToastData; onDone?: () => void }) {
-  const Icon = ICONS[data.icon] ?? ICheck;
+  const Icon = (ICONS as Record<string, typeof ICheck>)[data.icon] ?? ICheck;
   return (
     <div className={`toast ${data.tone === "error" ? "toast-error" : ""}`}>
       {data.image ? (
         <img className="toast-thumb" src={data.image} alt="" draggable={false} />
+      ) : data.icon === "rain" ? (
+        <div className="toast-icon">
+          <WeatherIcon code={data.wx ?? 61} size={24} />
+        </div>
       ) : data.swatch ? (
         <div className="toast-swatch" style={{ background: data.swatch }} />
       ) : (

@@ -5,6 +5,7 @@ mod ai;
 mod clips;
 mod native;
 mod store;
+mod weather;
 
 use std::collections::HashMap;
 use std::fs;
@@ -188,6 +189,8 @@ struct Shared {
     capturing: AtomicBool,
     /// Bumped to cancel the reply being streamed.
     ai_gen: AtomicU32,
+    weather: Mutex<Option<weather::WeatherPayload>>,
+    weather_wake: Mutex<Sender<()>>,
 }
 
 /// A monitor snapshot (physical pixels, top-down BGRA).
@@ -636,6 +639,54 @@ fn spawn_clip_thread(app: AppHandle, shared: Arc<Shared>) {
         .expect("failed to start clipboard thread");
 }
 
+/// Forecast every 15 minutes (sooner when the city changes or on request).
+fn spawn_weather_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<()>) {
+    thread::Builder::new()
+        .name("weather".into())
+        .spawn(move || {
+            let mut ip_place: Option<weather::Place> = None;
+            let mut wait = Duration::from_secs(3);
+            loop {
+                match rx.recv_timeout(wait) {
+                    Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+                while rx.try_recv().is_ok() {}
+                let s = lock(&shared.settings).clone();
+                if !s.weather_enabled {
+                    wait = Duration::from_secs(3600);
+                    continue;
+                }
+                let result = tauri::async_runtime::block_on(async {
+                    let (city, lat, lon) = if !s.weather_city.is_empty() {
+                        (s.weather_city.clone(), s.weather_lat, s.weather_lon)
+                    } else {
+                        if ip_place.is_none() {
+                            ip_place = Some(weather::locate().await?);
+                        }
+                        let p = ip_place.clone().unwrap();
+                        (p.name, p.lat, p.lon)
+                    };
+                    let data = weather::forecast(lat, lon).await?;
+                    Ok::<_, String>(weather::WeatherPayload {
+                        city,
+                        fetched_ms: store::now_ms(),
+                        data,
+                    })
+                });
+                match result {
+                    Ok(w) => {
+                        *lock(&shared.weather) = Some(w.clone());
+                        let _ = app.emit("weather", w);
+                        wait = Duration::from_secs(15 * 60);
+                    }
+                    Err(_) => wait = Duration::from_secs(120),
+                }
+            }
+        })
+        .expect("failed to start weather thread");
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -651,6 +702,7 @@ struct InitPayload {
     volume: VolumePayload,
     version: String,
     hotkey_error: Option<String>,
+    weather: Option<weather::WeatherPayload>,
 }
 
 #[tauri::command]
@@ -664,6 +716,7 @@ fn init(app: AppHandle, state: St<'_>) -> InitPayload {
         volume: lock(&state.volume).clone(),
         version: app.package_info().version.to_string(),
         hotkey_error: lock(&state.hotkey_error).clone(),
+        weather: lock(&state.weather).clone(),
     }
 }
 
@@ -706,8 +759,15 @@ fn save_settings(app: AppHandle, state: St<'_>, settings: Settings) -> Result<Se
         };
         let _ = app.emit("clips", views);
     }
+    let weather_changed = next.weather_enabled != old.weather_enabled
+        || next.weather_city != old.weather_city
+        || next.weather_lat != old.weather_lat
+        || next.weather_lon != old.weather_lon;
     save_json(&state.paths.settings(), &next);
     *lock(&state.settings) = next.clone();
+    if weather_changed {
+        let _ = lock(&state.weather_wake).send(());
+    }
     Ok(next)
 }
 
@@ -1460,6 +1520,21 @@ fn ai_stop(state: St<'_>) {
 }
 
 #[tauri::command]
+async fn weather_search(q: String) -> Result<Vec<weather::Place>, String> {
+    weather::search(q.trim()).await
+}
+
+#[tauri::command]
+async fn weather_locate() -> Result<weather::Place, String> {
+    weather::locate().await
+}
+
+#[tauri::command]
+fn weather_refresh(state: St<'_>) {
+    let _ = lock(&state.weather_wake).send(());
+}
+
+#[tauri::command]
 fn chat_load(state: St<'_>) -> serde_json::Value {
     let v: serde_json::Value = load_json(&state.paths.chat());
     if v.is_array() {
@@ -1552,6 +1627,7 @@ fn main() {
             let clips = ClipStore::load(paths.clips(), paths.clip_dir());
             let (media_tx, media_rx) = channel();
             let (audio_tx, audio_rx) = channel();
+            let (weather_tx, weather_rx) = channel();
 
             let shared = Arc::new(Shared {
                 paths,
@@ -1580,6 +1656,8 @@ fn main() {
                 shot_seq: AtomicU32::new(0),
                 capturing: AtomicBool::new(false),
                 ai_gen: AtomicU32::new(0),
+                weather: Mutex::new(None),
+                weather_wake: Mutex::new(weather_tx),
             });
             app.manage(shared.clone());
 
@@ -1610,6 +1688,7 @@ fn main() {
             spawn_media_thread(app.handle().clone(), shared.clone(), media_rx);
             spawn_audio_thread(app.handle().clone(), shared.clone(), audio_rx);
             spawn_clip_thread(app.handle().clone(), shared.clone());
+            spawn_weather_thread(app.handle().clone(), shared.clone(), weather_rx);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1651,6 +1730,9 @@ fn main() {
             ai_stop,
             chat_load,
             chat_save,
+            weather_search,
+            weather_locate,
+            weather_refresh,
             quit
         ])
         .run(tauri::generate_context!())

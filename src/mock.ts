@@ -34,6 +34,10 @@ const state = {
     aiUrl: "http://localhost:1234/v1",
     aiKey: "",
     aiModel: "qwen2.5-7b-instruct",
+    weatherEnabled: true,
+    weatherCity: "Москва",
+    weatherLat: 55.75,
+    weatherLon: 37.62,
   },
   data: {
     shelf: [
@@ -91,6 +95,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
   const r = (v: unknown) => Promise.resolve(v as T);
   switch (cmd) {
     case "init":
+      (state as any).weather = demoWeather();
       return r({ ...state, cover: { id: 1, url: cover }, version: "0.1.0-dev", hotkeyError: null });
     case "list_apps":
       return r(apps);
@@ -176,12 +181,58 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       }, 45);
       return r(null);
     }
+    case "weather_search":
+      return r([
+        { name: "Москва", area: "Россия", lat: 55.75, lon: 37.62 },
+        { name: "Москва", area: "Айдахо, США", lat: 46.73, lon: -117 },
+      ]);
+    case "weather_locate":
+      return r({ name: "Санкт-Петербург", area: "Россия", lat: 59.94, lon: 30.31 });
     case "open_launcher":
       mockEmit("launcher", true);
       return r(null);
     default:
       return r(true);
   }
+}
+
+// --- demo forecast ----------------------------------------------------------
+
+function demoWeather() {
+  const off = 3 * 3600;
+  const base = new Date(Date.now() + off * 1000);
+  base.setUTCMinutes(0, 0, 0);
+  const iso = (d: Date) => d.toISOString().slice(0, 16);
+  const time: string[] = [];
+  const temp: number[] = [];
+  const prob: number[] = [];
+  const code: number[] = [];
+  const isDay: number[] = [];
+  for (let i = -2; i < 7 * 24; i++) {
+    const d = new Date(base.getTime() + i * 3600e3);
+    const hr = d.getUTCHours();
+    time.push(iso(d));
+    temp.push(Math.round((10 + 6 * Math.sin(((hr - 9) / 24) * 2 * Math.PI) + (i % 5) * 0.3) * 10) / 10);
+    prob.push(i === 1 ? 75 : i > 1 && i < 4 ? 60 : (i * 13) % 40);
+    code.push(i === 1 || i === 2 ? 61 : hr > 9 && hr < 15 ? 2 : hr < 6 ? 0 : 3);
+    isDay.push(hr >= 7 && hr < 19 ? 1 : 0);
+  }
+  const days = Array.from({ length: 7 }, (_, i) => iso(new Date(base.getTime() + i * 86400e3)).slice(0, 10));
+  return {
+    city: "Москва",
+    fetchedMs: Date.now(),
+    data: {
+      utc_offset_seconds: off,
+      current: { temperature_2m: 15.4, apparent_temperature: 13.9, relative_humidity_2m: 71, wind_speed_10m: 3.4, weather_code: 2, is_day: 1, precipitation: 0 },
+      hourly: { time, temperature_2m: temp, precipitation_probability: prob, weather_code: code, is_day: isDay },
+      daily: {
+        time: days,
+        weather_code: [2, 61, 3, 0, 71, 95, 1],
+        temperature_2m_min: [7, 5, 4, 2, -1, 6, 3],
+        temperature_2m_max: [16, 12, 10, 11, 4, 14, 9],
+      },
+    },
+  };
 }
 
 // --- simulated native events -------------------------------------------------

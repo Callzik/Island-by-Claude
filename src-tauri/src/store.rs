@@ -63,6 +63,11 @@ pub struct Settings {
     pub ai_url: String,
     pub ai_key: String,
     pub ai_model: String,
+    /// Weather (Open-Meteo). Empty city = detect by IP.
+    pub weather_enabled: bool,
+    pub weather_city: String,
+    pub weather_lat: f64,
+    pub weather_lon: f64,
 }
 
 impl Default for Settings {
@@ -82,6 +87,10 @@ impl Default for Settings {
             ai_url: "http://localhost:1234/v1".into(),
             ai_key: String::new(),
             ai_model: String::new(),
+            weather_enabled: true,
+            weather_city: String::new(),
+            weather_lat: 0.0,
+            weather_lon: 0.0,
         }
     }
 }

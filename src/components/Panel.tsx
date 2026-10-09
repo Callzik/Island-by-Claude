@@ -1,16 +1,18 @@
 import type { Clip, Media, PinItem, Settings, ShelfItem, Volume } from "../api";
 import type { RGB } from "../lib/color";
-import { IChat, IClipboard, IHome, IInbox, ILyrics, IPin, ISliders } from "./Icons";
+import { IChat, IClipboard, IHome, IInbox, ILyrics, IPin, ISliders, ISun } from "./Icons";
 import { Home } from "./Home";
 import { Lyrics } from "./Lyrics";
 import { Chat } from "./Chat";
+import { Weather } from "./Weather";
+import type { WeatherPayload } from "../lib/weather";
 import { ClipboardTab } from "./ClipboardTab";
 import { ShelfTab } from "./ShelfTab";
 import { SettingsTab } from "./SettingsTab";
 import type { ToastData } from "./Toast";
 import type { LyricsState } from "../lib/useLyrics";
 
-export type Tab = "home" | "clipboard" | "shelf" | "chat" | "lyrics" | "settings";
+export type Tab = "home" | "clipboard" | "shelf" | "chat" | "weather" | "lyrics" | "settings";
 
 // order as in the promo video; «Песня» (lyrics) comes last
 const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome }[] = [
@@ -18,6 +20,7 @@ const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome }[
   { id: "clipboard", label: "Буфер", Icon: IClipboard },
   { id: "shelf", label: "Полка", Icon: IInbox },
   { id: "chat", label: "Чат", Icon: IChat },
+  { id: "weather", label: "Погода", Icon: ISun },
   { id: "lyrics", label: "Песня", Icon: ILyrics },
 ];
 
@@ -47,6 +50,7 @@ export interface PanelProps {
   ask: { text: string; n: number } | null;
   onAsked: () => void;
   setDropHandler: (fn: ((paths: string[]) => void) | null) => void;
+  weather: WeatherPayload | null;
 }
 
 export function Panel(p: PanelProps) {
@@ -93,6 +97,7 @@ export function Panel(p: PanelProps) {
             openSettings={() => p.setTab("settings")}
           />
         )}
+        {p.tab === "weather" && <Weather weather={p.weather} settings={p.settings} openSettings={() => p.setTab("settings")} />}
         {p.tab === "clipboard" && <ClipboardTab clips={p.clips} onClose={p.onClose} toast={p.toast} />}
         {p.tab === "shelf" && <ShelfTab shelf={p.shelf} setShelf={p.setShelf} toast={p.toast} setBusy={p.setBusy} />}
         {p.tab === "settings" && <SettingsTab settings={p.settings} save={p.saveSettings} version={p.version} setBusy={p.setBusy} />}

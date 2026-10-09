@@ -55,6 +55,12 @@ export const IStop = (p: P) => (
     <rect x="6.5" y="6.5" width="11" height="11" rx="2.5" fill="currentColor" stroke="none" />
   </Svg>
 );
+export const ISun = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="3.8" />
+    <path d="M12 3.5v1.8M12 18.7v1.8M3.5 12h1.8M18.7 12h1.8M6 6l1.3 1.3M16.7 16.7 18 18M6 18l1.3-1.3M16.7 7.3 18 6" />
+  </Svg>
+);
 export const IClipboard = (p: P) => (
   <Svg {...p}>
     <rect x="5" y="4.5" width="14" height="16" rx="2.5" />
