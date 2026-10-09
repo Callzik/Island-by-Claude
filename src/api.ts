@@ -18,6 +18,10 @@ export interface Settings {
   captureEnabled: boolean;
   hotkeyRegion: string;
   hotkeyOcr: string;
+  aiEnabled: boolean;
+  aiUrl: string;
+  aiKey: string;
+  aiModel: string;
 }
 
 export interface ShelfItem {

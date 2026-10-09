@@ -4,7 +4,7 @@ import { calculate, formatNumber, plainNumber } from "../lib/calc";
 import { score } from "../lib/fuzzy";
 import { useIcon } from "../lib/icons";
 import { convertCurrency, convertUnits, ensureRates } from "../lib/units";
-import { ICalc, IEnter, IFile, IFolder, IGlobe, ILock, ISearch, ISwap } from "./Icons";
+import { ICalc, IChat, IEnter, IFile, IFolder, IGlobe, ILock, ISearch, ISwap } from "./Icons";
 import type { ToastData } from "./Toast";
 
 interface Row {
@@ -51,6 +51,8 @@ export function Launcher({
   onClose,
   toast,
   onLaunch,
+  ai,
+  onAsk,
 }: {
   apps: AppItem[];
   pins: PinItem[];
@@ -61,6 +63,9 @@ export function Launcher({
   onClose: (restoreFocus: boolean) => void;
   toast: (t: ToastData) => void;
   onLaunch: (target: string) => void;
+  /** model name when the AI chat is on */
+  ai: string | null;
+  onAsk: (q: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -155,6 +160,16 @@ export function Launcher({
       const url = /^https?:\/\//i.test(query) ? query : "https://" + query;
       out.push({ id: "url", glyph: <IGlobe size={19} />, title: `Открыть ${query}`, hint: "Сайт", run: () => launch(url) });
     }
+    // keep the two catch-all rows visible below the matches
+    out.splice(MAX_ROWS - (ai ? 2 : 1));
+    if (ai)
+      out.push({
+        id: "ai",
+        glyph: <IChat size={19} />,
+        title: `Спросить ИИ: «${query}»`,
+        hint: ai,
+        run: () => onAsk(query),
+      });
     out.push({
       id: "web",
       glyph: <ISearch size={19} />,
@@ -164,7 +179,7 @@ export function Launcher({
     });
     return out.slice(0, MAX_ROWS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, apps, pins, shelf, usage]);
+  }, [q, apps, pins, shelf, usage, ai]);
 
   // exchange rates arrive asynchronously
   useEffect(() => {

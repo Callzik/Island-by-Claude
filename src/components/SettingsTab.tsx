@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { call, type Settings } from "../api";
 import { IKeyboard, IPower } from "./Icons";
 
@@ -76,6 +76,87 @@ function HotkeyField({ value, onChange, setBusy }: { value: string; onChange: (v
       <IKeyboard size={16} />
       {recording ? "Нажмите сочетание…" : value}
     </button>
+  );
+}
+
+/** Text input that saves on Enter / when focus leaves. */
+function TextField({
+  value,
+  onSave,
+  setBusy,
+  placeholder,
+  secret,
+}: {
+  value: string;
+  onSave: (v: string) => void;
+  setBusy: (b: boolean) => void;
+  placeholder?: string;
+  secret?: boolean;
+}) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  const commit = () => {
+    if (v !== value) onSave(v.trim());
+  };
+  return (
+    <input
+      className="field"
+      type={secret ? "password" : "text"}
+      value={v}
+      placeholder={placeholder}
+      spellCheck={false}
+      autoComplete="off"
+      onFocus={() => setBusy(true)}
+      onBlur={() => {
+        setBusy(false);
+        commit();
+      }}
+      onChange={(e) => setV(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+    />
+  );
+}
+
+function ModelPicker({ settings, save, setBusy }: { settings: Settings; save: (m: string) => void; setBusy: (b: boolean) => void }) {
+  const [models, setModels] = useState<string[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = () => {
+    setErr(null);
+    call<string[]>("ai_models", {})
+      .then((m) => setModels(m))
+      .catch((e) => {
+        setModels([]);
+        setErr(String(e));
+      });
+  };
+  useEffect(load, [settings.aiUrl, settings.aiKey]);
+  const list = models ?? [];
+  const options = settings.aiModel && !list.includes(settings.aiModel) ? [settings.aiModel, ...list] : list;
+  return (
+    <div className="model-picker">
+      <select
+        className="select"
+        value={settings.aiModel}
+        onFocus={() => setBusy(true)}
+        onBlur={() => setBusy(false)}
+        onChange={(e) => {
+          setBusy(false);
+          save(e.target.value);
+        }}
+      >
+        <option value="">{models === null ? "Загружаю…" : "По умолчанию сервера"}</option>
+        {options.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+      <button className="text-btn" onClick={load} title={err ?? "Обновить список"}>
+        {err ? "Нет связи" : "Обновить"}
+      </button>
+    </div>
   );
 }
 
@@ -165,6 +246,36 @@ export function SettingsTab({
             <div className="setting-sub">Распознать и скопировать</div>
           </div>
           <HotkeyField value={settings.hotkeyOcr} onChange={(v) => set("hotkeyOcr", v)} setBusy={setBusy} />
+        </div>
+
+        <div className="settings-section">ИИ-чат</div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Вкладка «Чат»</div>
+            <div className="setting-sub">И строка «Спросить ИИ» в лаунчере</div>
+          </div>
+          <Toggle checked={settings.aiEnabled} onChange={(v) => set("aiEnabled", v)} />
+        </div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Модель</div>
+            <div className="setting-sub">Список с сервера</div>
+          </div>
+          <ModelPicker settings={settings} save={(m) => set("aiModel", m)} setBusy={setBusy} />
+        </div>
+        <div className="setting setting-wide">
+          <div>
+            <div className="setting-title">Адрес API</div>
+            <div className="setting-sub">OpenAI-совместимый: LM Studio, Ollama, OpenRouter…</div>
+          </div>
+          <TextField value={settings.aiUrl} onSave={(v) => set("aiUrl", v || "http://localhost:1234/v1")} setBusy={setBusy} placeholder="http://localhost:1234/v1" />
+        </div>
+        <div className="setting setting-wide">
+          <div>
+            <div className="setting-title">Ключ API</div>
+            <div className="setting-sub">Необязательно · хранится только на этом компьютере</div>
+          </div>
+          <TextField value={settings.aiKey} onSave={(v) => set("aiKey", v)} setBusy={setBusy} placeholder="sk-…" secret />
         </div>
       </div>
       <div className="settings-foot">

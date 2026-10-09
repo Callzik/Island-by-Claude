@@ -58,6 +58,11 @@ pub struct Settings {
     pub capture_enabled: bool,
     pub hotkey_region: String,
     pub hotkey_ocr: String,
+    /// AI chat: OpenAI-compatible server, optional key (kept only in this file), model id.
+    pub ai_enabled: bool,
+    pub ai_url: String,
+    pub ai_key: String,
+    pub ai_model: String,
 }
 
 impl Default for Settings {
@@ -73,6 +78,10 @@ impl Default for Settings {
             capture_enabled: true,
             hotkey_region: "Ctrl+Shift+S".into(),
             hotkey_ocr: "Ctrl+Shift+T".into(),
+            ai_enabled: true,
+            ai_url: "http://localhost:1234/v1".into(),
+            ai_key: String::new(),
+            ai_model: String::new(),
         }
     }
 }
@@ -124,6 +133,9 @@ impl Paths {
     }
     pub fn clips(&self) -> PathBuf {
         self.dir.join("clipboard.json")
+    }
+    pub fn chat(&self) -> PathBuf {
+        self.dir.join("chat.json")
     }
     pub fn clip_dir(&self) -> PathBuf {
         self.dir.join("clips")

@@ -1,6 +1,7 @@
 // Island — a liquid "Dynamic Island" for Windows 10/11.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai;
 mod clips;
 mod native;
 mod store;
@@ -185,6 +186,8 @@ struct Shared {
     shot: Mutex<Option<Shot>>,
     shot_seq: AtomicU32,
     capturing: AtomicBool,
+    /// Bumped to cancel the reply being streamed.
+    ai_gen: AtomicU32,
 }
 
 /// A monitor snapshot (physical pixels, top-down BGRA).
@@ -1355,6 +1358,123 @@ fn capture_finish(app: AppHandle, state: St<'_>, id: u32, rect: Option<PxRect>, 
 }
 
 // ---------------------------------------------------------------------------
+// AI chat
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AiChunk {
+    id: String,
+    delta: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AiDone {
+    id: String,
+    error: Option<String>,
+}
+
+#[tauri::command]
+async fn ai_models(state: St<'_>, url: Option<String>, key: Option<String>) -> Result<Vec<String>, String> {
+    let (u, k) = {
+        let s = lock(&state.settings);
+        (url.unwrap_or_else(|| s.ai_url.clone()), key.unwrap_or_else(|| s.ai_key.clone()))
+    };
+    ai::models(&u, &k).await
+}
+
+#[tauri::command]
+async fn ai_attach(path: String) -> Result<ai::Attachment, String> {
+    tauri::async_runtime::spawn_blocking(move || ai::attach(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Streams a chat completion: "ai-chunk" for every piece, then "ai-done".
+#[tauri::command]
+fn ai_send(app: AppHandle, state: St<'_>, id: String, messages: serde_json::Value) {
+    let shared = state.inner().clone();
+    let gen = shared.ai_gen.fetch_add(1, Ordering::Relaxed) + 1;
+    let (base, key, model) = {
+        let s = lock(&shared.settings);
+        (s.ai_url.clone(), s.ai_key.clone(), s.ai_model.clone())
+    };
+    tauri::async_runtime::spawn(async move {
+        let done = |error: Option<String>| {
+            let _ = app.emit("ai-done", AiDone { id: id.clone(), error });
+        };
+        let mut body = serde_json::json!({ "messages": messages, "stream": true, "temperature": 0.7 });
+        if !model.is_empty() {
+            body["model"] = serde_json::Value::String(model);
+        }
+        let mut req = ai::client().post(ai::endpoint(&base, "chat/completions")).json(&body);
+        if !key.is_empty() {
+            req = req.bearer_auth(&key);
+        }
+        let mut resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => return done(Some(ai::explain(&e, &base))),
+        };
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            let msg = serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|v| v["error"]["message"].as_str().or(v["error"].as_str()).map(String::from))
+                .unwrap_or_else(|| text.chars().take(200).collect());
+            return done(Some(format!("Сервер ответил {status}: {msg}")));
+        }
+        let mut buf = String::new();
+        loop {
+            if shared.ai_gen.load(Ordering::Relaxed) != gen {
+                return done(None);
+            }
+            let chunk = match resp.chunk().await {
+                Ok(Some(c)) => c,
+                Ok(None) => break,
+                Err(e) => return done(Some(ai::explain(&e, &base))),
+            };
+            buf.push_str(&String::from_utf8_lossy(&chunk));
+            while let Some(nl) = buf.find('\n') {
+                let line: String = buf.drain(..=nl).collect();
+                match ai::parse_sse_line(&line) {
+                    ai::Sse::Delta(d) => {
+                        let _ = app.emit("ai-chunk", AiChunk { id: id.clone(), delta: d });
+                    }
+                    ai::Sse::Done => return done(None),
+                    ai::Sse::Skip => {}
+                }
+            }
+        }
+        if let ai::Sse::Delta(d) = ai::parse_sse_line(&buf) {
+            let _ = app.emit("ai-chunk", AiChunk { id: id.clone(), delta: d });
+        }
+        done(None)
+    });
+}
+
+#[tauri::command]
+fn ai_stop(state: St<'_>) {
+    state.ai_gen.fetch_add(1, Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn chat_load(state: St<'_>) -> serde_json::Value {
+    let v: serde_json::Value = load_json(&state.paths.chat());
+    if v.is_array() {
+        v
+    } else {
+        serde_json::Value::Array(Vec::new())
+    }
+}
+
+#[tauri::command]
+fn chat_save(state: St<'_>, messages: serde_json::Value) {
+    save_json(&state.paths.chat(), &messages);
+}
+
+// ---------------------------------------------------------------------------
 // Tray & entry point
 // ---------------------------------------------------------------------------
 
@@ -1459,6 +1579,7 @@ fn main() {
                 shot: Mutex::new(None),
                 shot_seq: AtomicU32::new(0),
                 capturing: AtomicBool::new(false),
+                ai_gen: AtomicU32::new(0),
             });
             app.manage(shared.clone());
 
@@ -1524,6 +1645,12 @@ fn main() {
             overlay_show,
             capture_cancel,
             capture_finish,
+            ai_models,
+            ai_attach,
+            ai_send,
+            ai_stop,
+            chat_load,
+            chat_save,
             quit
         ])
         .run(tauri::generate_context!())

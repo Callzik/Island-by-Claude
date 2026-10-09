@@ -62,6 +62,12 @@ export default function App({ boot }: { boot: InitPayload }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [tab, setTab] = useState<Tab>("home");
+  const [ask, setAsk] = useState<{ text: string; n: number } | null>(null);
+  const chatDrop = useRef<((paths: string[]) => void) | null>(null);
+  const setChatDrop = useCallback((fn: ((paths: string[]) => void) | null) => {
+    chatDrop.current = fn;
+  }, []);
+  const clearAsk = useCallback(() => setAsk(null), []);
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [launcherH, setLauncherH] = useState(64);
   const [drop, setDrop] = useState<{ paths: string[]; zone: DropZone | null } | null>(null);
@@ -70,8 +76,8 @@ export default function App({ boot }: { boot: InitPayload }) {
   const [suppressed, setSuppressed] = useState(false);
 
   // latest values for long-lived event listeners
-  const live = useRef({ panelOpen, pinned, launcherOpen, drop, settings, media, armed: true, lmb: false, busy: false, toastActions: false });
-  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media, toastActions: !!toast?.actions?.length };
+  const live = useRef({ panelOpen, pinned, launcherOpen, drop, settings, media, armed: true, lmb: false, busy: false, toastActions: false, tab: "home" as Tab });
+  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media, toastActions: !!toast?.actions?.length, tab };
 
   const mode: Mode = suppressed
     ? "hidden"
@@ -255,6 +261,17 @@ export default function App({ boot }: { boot: InitPayload }) {
     call("launcher_closed", { restore }).catch(() => {});
   }, []);
 
+  // "Спросить ИИ" from the launcher: open the chat tab and send right away
+  const askAi = useCallback(
+    (text: string) => {
+      setLauncherOpen(false);
+      call("launcher_closed", { restore: false }).catch(() => {});
+      setAsk({ text, n: Date.now() });
+      openPanel("chat", true);
+    },
+    [openPanel],
+  );
+
   // ---- native events -------------------------------------------------------
   useEffect(() => {
     let enterT = 0;
@@ -329,6 +346,12 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(
       onDrop((e) => {
         const cx = liquidRef.current?.centerX ?? window.innerWidth / 2;
+        // the chat tab takes files as attachments
+        const n = live.current;
+        if (n.panelOpen && n.tab === "chat" && chatDrop.current) {
+          if (e.type === "drop") chatDrop.current(e.paths);
+          return;
+        }
         if (e.type === "enter") setDrop({ paths: e.paths, zone: null });
         else if (e.type === "over") {
           const zone: DropZone | null = e.y > BOX.drop.h + 30 ? null : e.x < cx ? "shelf" : "launcher";
@@ -434,6 +457,9 @@ export default function App({ boot }: { boot: InitPayload }) {
             onLauncher={() => call("open_launcher")}
             toast={showToast}
             setBusy={setBusy}
+            ask={ask}
+            onAsked={clearAsk}
+            setDropHandler={setChatDrop}
           />
         );
       case "launcher":
@@ -448,12 +474,14 @@ export default function App({ boot }: { boot: InitPayload }) {
             onClose={closeLauncher}
             toast={showToast}
             onLaunch={bumpUsage}
+            ai={settings.aiEnabled ? settings.aiModel || "ИИ" : null}
+            onAsk={askAi}
           />
         );
       default:
         return null;
     }
-  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage]);
+  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi]);
 
   const onIslandClick = () => {
     if (mode === "toast" && toast?.actions?.length) return;

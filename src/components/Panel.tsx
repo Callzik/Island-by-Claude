@@ -1,21 +1,24 @@
 import type { Clip, Media, PinItem, Settings, ShelfItem, Volume } from "../api";
 import type { RGB } from "../lib/color";
-import { IClipboard, IHome, IInbox, ILyrics, IPin, ISliders } from "./Icons";
+import { IChat, IClipboard, IHome, IInbox, ILyrics, IPin, ISliders } from "./Icons";
 import { Home } from "./Home";
 import { Lyrics } from "./Lyrics";
+import { Chat } from "./Chat";
 import { ClipboardTab } from "./ClipboardTab";
 import { ShelfTab } from "./ShelfTab";
 import { SettingsTab } from "./SettingsTab";
 import type { ToastData } from "./Toast";
 import type { LyricsState } from "../lib/useLyrics";
 
-export type Tab = "home" | "lyrics" | "clipboard" | "shelf" | "settings";
+export type Tab = "home" | "clipboard" | "shelf" | "chat" | "lyrics" | "settings";
 
+// order as in the promo video; «Песня» (lyrics) comes last
 const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome }[] = [
   { id: "home", label: "Главная", Icon: IHome },
-  { id: "lyrics", label: "Текст", Icon: ILyrics },
   { id: "clipboard", label: "Буфер", Icon: IClipboard },
   { id: "shelf", label: "Полка", Icon: IInbox },
+  { id: "chat", label: "Чат", Icon: IChat },
+  { id: "lyrics", label: "Песня", Icon: ILyrics },
 ];
 
 export interface PanelProps {
@@ -41,6 +44,9 @@ export interface PanelProps {
   onLauncher: () => void;
   toast: (t: ToastData, ms?: number) => void;
   setBusy: (b: boolean) => void;
+  ask: { text: string; n: number } | null;
+  onAsked: () => void;
+  setDropHandler: (fn: ((paths: string[]) => void) | null) => void;
 }
 
 export function Panel(p: PanelProps) {
@@ -76,6 +82,17 @@ export function Panel(p: PanelProps) {
       <section className="panel-body">
         {p.tab === "home" && <Home {...p} />}
         {p.tab === "lyrics" && <Lyrics media={p.media} mediaAt={p.mediaAt} accent={p.accent} lyrics={p.lyrics} />}
+        {p.tab === "chat" && (
+          <Chat
+            settings={p.settings}
+            toast={p.toast}
+            setBusy={p.setBusy}
+            ask={p.ask}
+            onAsked={p.onAsked}
+            setDropHandler={p.setDropHandler}
+            openSettings={() => p.setTab("settings")}
+          />
+        )}
         {p.tab === "clipboard" && <ClipboardTab clips={p.clips} onClose={p.onClose} toast={p.toast} />}
         {p.tab === "shelf" && <ShelfTab shelf={p.shelf} setShelf={p.setShelf} toast={p.toast} setBusy={p.setBusy} />}
         {p.tab === "settings" && <SettingsTab settings={p.settings} save={p.saveSettings} version={p.version} setBusy={p.setBusy} />}

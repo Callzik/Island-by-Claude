@@ -19,6 +19,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 png = "0.17"
 rqrr = "0.11"
+# HTTP for the AI chat / weather: Windows' own TLS (schannel), no C toolchain needed
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json", "multipart", "charset"] }
+pdf-extract = "0.12"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

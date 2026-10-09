@@ -34,6 +34,27 @@ export const ILyrics = (p: P) => (
     <circle cx="15.5" cy="16" r="2" />
   </Svg>
 );
+export const IChat = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 17h-7l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5z" />
+    <path d="M9.5 9.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6zM15 9h1.5M14 12.5h2.5" />
+  </Svg>
+);
+export const IPaperclip = (p: P) => (
+  <Svg {...p}>
+    <path d="m19.5 11.5-7.4 7.4a4.6 4.6 0 0 1-6.5-6.5l7.8-7.8a3 3 0 0 1 4.3 4.3l-7.6 7.6a1.5 1.5 0 0 1-2.1-2.1l7-7" />
+  </Svg>
+);
+export const ISend = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 19.5V5M6 11l6-6 6 6" />
+  </Svg>
+);
+export const IStop = (p: P) => (
+  <Svg {...p}>
+    <rect x="6.5" y="6.5" width="11" height="11" rx="2.5" fill="currentColor" stroke="none" />
+  </Svg>
+);
 export const IClipboard = (p: P) => (
   <Svg {...p}>
     <rect x="5" y="4.5" width="14" height="16" rx="2.5" />

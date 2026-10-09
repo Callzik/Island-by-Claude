@@ -30,6 +30,10 @@ const state = {
     captureEnabled: true,
     hotkeyRegion: "Ctrl+Shift+S",
     hotkeyOcr: "Ctrl+Shift+T",
+    aiEnabled: true,
+    aiUrl: "http://localhost:1234/v1",
+    aiKey: "",
+    aiModel: "qwen2.5-7b-instruct",
   },
   data: {
     shelf: [
@@ -146,6 +150,30 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
         picker: { icon: "color", title: "#D97757", subtitle: "Цвет скопирован", swatch: "#D97757", ms: 3000 },
       };
       setTimeout(() => mockEmit("toast", demo[args.mode as string] ?? demo.region), 500);
+      return r(null);
+    }
+    case "ai_models":
+      return r(["qwen2.5-7b-instruct", "llama-3.2-3b-instruct", "gemma-3-4b-it"]);
+    case "ai_attach": {
+      const name = String(args.path).split(/[\\/]/).pop()!;
+      return r({ name, kind: "text", label: "12 стр", text: "Демо-текст документа." });
+    }
+    case "chat_load":
+      return r([]);
+    case "ai_send": {
+      // stream a canned answer word by word
+      const reply =
+        "Вот что можно сделать:\n\n1. **Открыть** файл в редакторе\n2. Найти строку с `TODO`\n3. Заменить её\n\n```ts\nconst answer = 42;\n```\n\nГотово — *это демо-ответ*, настоящий придёт от вашей модели.";
+      const parts = reply.split(/(?<=\s)/);
+      let i = 0;
+      const tick = setInterval(() => {
+        if (i >= parts.length) {
+          clearInterval(tick);
+          mockEmit("ai-done", { id: args.id, error: null });
+          return;
+        }
+        mockEmit("ai-chunk", { id: args.id, delta: parts[i++] });
+      }, 45);
       return r(null);
     }
     case "open_launcher":
