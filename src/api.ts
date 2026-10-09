@@ -32,6 +32,8 @@ export interface Settings {
   voiceWhisperKey: string;
   voiceWhisperModel: string;
   downloadsEnabled: boolean;
+  textEnabled: boolean;
+  notesEnabled: boolean;
 }
 
 export interface ShelfItem {

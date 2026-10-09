@@ -1824,6 +1824,41 @@ fn voice(state: St<'_>, action: String) {
     let _ = lock(&state.voice_tx).send(cmd);
 }
 
+/// Current clipboard text (for the «Текст» tab).
+#[tauri::command]
+async fn clip_read_text() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| match clip::read() {
+        Some(clip::ClipData::Text(t)) => Some(t),
+        _ => None,
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Puts text on the clipboard and pastes it into the window the user worked in.
+#[tauri::command]
+async fn paste_text(state: St<'_>, text: String) -> Result<bool, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || paste_into_last(&shared, &text))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn notes_load(state: St<'_>) -> serde_json::Value {
+    let v: serde_json::Value = load_json(&state.paths.notes());
+    if v.is_array() {
+        v
+    } else {
+        serde_json::Value::Array(Vec::new())
+    }
+}
+
+#[tauri::command]
+fn notes_save(state: St<'_>, notes: serde_json::Value) {
+    save_json(&state.paths.notes(), &notes);
+}
+
 #[tauri::command]
 fn chat_load(state: St<'_>) -> serde_json::Value {
     let v: serde_json::Value = load_json(&state.paths.chat());
@@ -2031,6 +2066,10 @@ fn main() {
             weather_locate,
             weather_refresh,
             voice,
+            clip_read_text,
+            paste_text,
+            notes_load,
+            notes_save,
             quit
         ])
         .run(tauri::generate_context!())

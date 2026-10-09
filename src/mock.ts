@@ -47,6 +47,8 @@ const state = {
     voiceWhisperKey: "",
     voiceWhisperModel: "whisper-1",
     downloadsEnabled: true,
+    textEnabled: true,
+    notesEnabled: true,
   },
   data: {
     shelf: [
@@ -230,6 +232,18 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       mockEmit("volume", state.volume);
       return r(true);
     }
+    case "clip_read_text":
+      return r("ghbdtn! это ТЕКСТ из буфера,   с лишними    пробелами\nи переносом посреди\nпредложения.");
+    case "notes_load":
+      return r(
+        (window as any).__notes ?? [
+          { id: "n1", text: "Список покупок\nмолоко, хлеб, кофе", pinned: true, updated: Date.now() - 3600e3 },
+          { id: "n2", text: "Идеи для Island\nжильцы, погода, голос", pinned: false, updated: Date.now() - 86400e3 },
+        ],
+      );
+    case "notes_save":
+      (window as any).__notes = args.notes;
+      return r(null);
     case "open_launcher":
       mockEmit("launcher", true);
       return r(null);

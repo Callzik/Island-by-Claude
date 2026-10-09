@@ -256,6 +256,8 @@ export function SettingsTab({
     { key: "cursorPull", title: "Тянуться к курсору", sub: "Жидкий край вытягивается навстречу" },
     { key: "hideFullscreen", title: "Прятать в полноэкранных приложениях", sub: "Игры, видео, презентации" },
     { key: "downloadsEnabled", title: "Загрузки браузера", sub: "Прогресс в острове, «Загружено» → открыть или на полку" },
+    { key: "textEnabled", title: "Вкладка «Текст»", sub: "Регистр, транслит, раскладка, пробелы" },
+    { key: "notesEnabled", title: "Вкладка «Заметки»", sub: "Сохраняются автоматически" },
   ];
 
   return (

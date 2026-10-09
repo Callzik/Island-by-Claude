@@ -76,6 +76,9 @@ pub struct Settings {
     pub voice_whisper_model: String,
     /// Progress of browser downloads in the island.
     pub downloads_enabled: bool,
+    /// Panel tabs «Текст» (text tools) and «Заметки».
+    pub text_enabled: bool,
+    pub notes_enabled: bool,
 }
 
 impl Default for Settings {
@@ -105,6 +108,8 @@ impl Default for Settings {
             voice_whisper_key: String::new(),
             voice_whisper_model: "whisper-1".into(),
             downloads_enabled: true,
+            text_enabled: true,
+            notes_enabled: true,
         }
     }
 }
@@ -156,6 +161,9 @@ impl Paths {
     }
     pub fn clips(&self) -> PathBuf {
         self.dir.join("clipboard.json")
+    }
+    pub fn notes(&self) -> PathBuf {
+        self.dir.join("notes.json")
     }
     pub fn chat(&self) -> PathBuf {
         self.dir.join("chat.json")

@@ -1,10 +1,12 @@
 import type { Clip, Media, PinItem, Settings, ShelfItem, Volume } from "../api";
 import type { RGB } from "../lib/color";
-import { IChat, IClipboard, IHome, IInbox, ILyrics, IPin, ISliders, ISun } from "./Icons";
+import { IChat, IClipboard, IHome, IInbox, ILyrics, INote, IPin, ISliders, ISun, ITextTool } from "./Icons";
 import { Home } from "./Home";
 import { Lyrics } from "./Lyrics";
 import { Chat } from "./Chat";
 import { Weather } from "./Weather";
+import { TextTab } from "./TextTab";
+import { NotesTab } from "./NotesTab";
 import type { WeatherPayload } from "../lib/weather";
 import { ClipboardTab } from "./ClipboardTab";
 import { ShelfTab } from "./ShelfTab";
@@ -12,15 +14,17 @@ import { SettingsTab } from "./SettingsTab";
 import type { ToastData } from "./Toast";
 import type { LyricsState } from "../lib/useLyrics";
 
-export type Tab = "home" | "clipboard" | "shelf" | "chat" | "weather" | "lyrics" | "settings";
+export type Tab = "home" | "clipboard" | "shelf" | "text" | "chat" | "notes" | "weather" | "lyrics" | "settings";
 
 // order as in the promo video; «Песня» (lyrics) comes last
-const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome }[] = [
+const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome; on?: (s: Settings) => boolean }[] = [
   { id: "home", label: "Главная", Icon: IHome },
   { id: "clipboard", label: "Буфер", Icon: IClipboard },
   { id: "shelf", label: "Полка", Icon: IInbox },
-  { id: "chat", label: "Чат", Icon: IChat },
-  { id: "weather", label: "Погода", Icon: ISun },
+  { id: "text", label: "Текст", Icon: ITextTool, on: (s) => s.textEnabled },
+  { id: "chat", label: "Чат", Icon: IChat, on: (s) => s.aiEnabled },
+  { id: "notes", label: "Заметки", Icon: INote, on: (s) => s.notesEnabled },
+  { id: "weather", label: "Погода", Icon: ISun, on: (s) => s.weatherEnabled },
   { id: "lyrics", label: "Песня", Icon: ILyrics },
 ];
 
@@ -58,7 +62,7 @@ export function Panel(p: PanelProps) {
     <div className="panel">
       <header className="panel-head">
         <nav className="tabs">
-          {TABS.map(({ id, label, Icon }) => (
+          {TABS.filter((t) => !t.on || t.on(p.settings)).map(({ id, label, Icon }) => (
             <button key={id} className={`tab ${p.tab === id ? "active" : ""}`} onClick={() => p.setTab(id)} title={label}>
               <Icon size={18} />
               {p.tab === id && <span>{label}</span>}
@@ -98,6 +102,8 @@ export function Panel(p: PanelProps) {
           />
         )}
         {p.tab === "weather" && <Weather weather={p.weather} settings={p.settings} openSettings={() => p.setTab("settings")} />}
+        {p.tab === "text" && <TextTab toast={p.toast} setBusy={p.setBusy} onClose={p.onClose} />}
+        {p.tab === "notes" && <NotesTab setBusy={p.setBusy} />}
         {p.tab === "clipboard" && <ClipboardTab clips={p.clips} onClose={p.onClose} toast={p.toast} />}
         {p.tab === "shelf" && <ShelfTab shelf={p.shelf} setShelf={p.setShelf} toast={p.toast} setBusy={p.setBusy} />}
         {p.tab === "settings" && <SettingsTab settings={p.settings} save={p.saveSettings} version={p.version} setBusy={p.setBusy} />}

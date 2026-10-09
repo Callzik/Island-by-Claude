@@ -77,6 +77,18 @@ export const IChevron = (p: P) => (
     <path d="m7 10 5 5 5-5" />
   </Svg>
 );
+export const INote = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 3.5h9l3.5 3.5v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 6 3.5z" />
+    <path d="M14.5 3.5V7.5h4M8 11.5h8M8 15h5.5" />
+  </Svg>
+);
+export const ITextTool = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 7V5h10v2M9 5v13M7 18h4" />
+    <path d="M14.5 13.5h6M17.5 11v8" />
+  </Svg>
+);
 export const IClipboard = (p: P) => (
   <Svg {...p}>
     <rect x="5" y="4.5" width="14" height="16" rx="2.5" />
