@@ -132,11 +132,6 @@ pub fn local_stamp() -> String {
     )
 }
 
-/// Local hour (0..23), used for "night" behaviour.
-pub fn local_hour() -> u32 {
-    unsafe { GetLocalTime() }.wHour as u32
-}
-
 /// %USERPROFILE%\Pictures\Screenshots (created if missing).
 pub fn screenshots_dir() -> Option<std::path::PathBuf> {
     let pics = unsafe { SHGetKnownFolderPath(&FOLDERID_Pictures, KF_FLAG_DEFAULT, None) }.ok()?;

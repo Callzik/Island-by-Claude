@@ -49,6 +49,8 @@ const state = {
     downloadsEnabled: true,
     textEnabled: true,
     notesEnabled: true,
+    residentsEnabled: true,
+    residents: ["jelly", "cat", "ghost"],
   },
   data: {
     shelf: [

@@ -34,6 +34,8 @@ export interface Settings {
   downloadsEnabled: boolean;
   textEnabled: boolean;
   notesEnabled: boolean;
+  residentsEnabled: boolean;
+  residents: string[];
 }
 
 export interface ShelfItem {

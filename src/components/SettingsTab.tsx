@@ -1,6 +1,7 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { call, type Settings } from "../api";
 import { IKeyboard, IPower } from "./Icons";
+import { RESIDENTS, ResidentSvg } from "../lib/residents";
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -372,6 +373,37 @@ export function SettingsTab({
         </div>
         <div className="setting setting-wide city-setting">
           <CityPicker settings={settings} save={save} setBusy={setBusy} />
+        </div>
+
+        <div className="settings-section">Жильцы</div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Жильцы у острова</div>
+            <div className="setting-sub">Прыгают под музыку, следят за курсором, ночью спят</div>
+          </div>
+          <Toggle checked={settings.residentsEnabled} onChange={(v) => set("residentsEnabled", v)} />
+        </div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Выбрано: {settings.residents.length} из {RESIDENTS.length}</div>
+            <div className="setting-sub">Нажмите на жильца, чтобы поселить или выселить</div>
+          </div>
+        </div>
+        <div className="setting setting-wide res-grid">
+          {RESIDENTS.map((r) => {
+            const on = settings.residents.includes(r.id);
+            return (
+              <button
+                key={r.id}
+                className={`res-pick ${on ? "on" : ""}`}
+                title={r.name}
+                onClick={() => set("residents", on ? settings.residents.filter((x) => x !== r.id) : [...settings.residents, r.id])}
+              >
+                <ResidentSvg r={r} face={{ look: { x: 0, y: 0.2 }, asleep: false }} size={30} />
+                <span>{r.name}</span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="settings-section">Голос → текст</div>

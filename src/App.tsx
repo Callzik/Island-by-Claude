@@ -27,6 +27,7 @@ import { rainSoon, sky, deg, type WeatherPayload } from "./lib/weather";
 import { WeatherCompact } from "./components/Weather";
 import { VoicePill, type VoiceState } from "./components/VoicePill";
 import { DownloadPill, type DownloadProgress } from "./components/DownloadPill";
+import { Residents, type IslandBox } from "./components/Residents";
 
 type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher" | "voice" | "download";
 
@@ -48,6 +49,7 @@ const MUSIC_LYRICS_W = 470;
 export default function App({ boot }: { boot: InitPayload }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const clipRef = useRef<HTMLDivElement>(null);
+  const islandBox = useRef<IslandBox>({ cx: 500, w: 0, h: 0 });
   const innerRef = useRef<HTMLDivElement>(null);
   // DOM snapshot of the previous state's content, faded out while the shape morphs
   const ghostRef = useRef<{ mode: Mode; node: Node | null }>({ mode: "hidden", node: null });
@@ -160,6 +162,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     const liquid = new Liquid(canvasRef.current!);
     liquidRef.current = liquid;
     liquid.onBox = (w, h, r) => {
+      islandBox.current = { cx: liquid.centerX, w, h: Math.max(0, h) };
       const el = clipRef.current;
       if (!el) return;
       el.style.left = `${liquid.centerX - w / 2}px`;
@@ -537,6 +540,14 @@ export default function App({ boot }: { boot: InitPayload }) {
   return (
     <div className={`root ${suppressed ? "is-hidden" : ""}`}>
       <canvas ref={canvasRef} className="liquid" />
+      {settings.residentsEnabled && (
+        <Residents
+          ids={settings.residents}
+          boxRef={islandBox}
+          visible={!["panel", "launcher", "drop", "hidden"].includes(mode)}
+          playing={!!media?.playing}
+        />
+      )}
       <div ref={clipRef} className={`island mode-${mode}`} onClick={onIslandClick}>
         <div ref={innerRef} className="island-inner" style={{ width: box.w, height: box.h }} key={mode}>
           {content}

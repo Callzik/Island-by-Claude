@@ -2646,3 +2646,155 @@ html.is-overlay body {
   height: 100%;
   justify-content: center;
 }
+
+/* --------------------------------------------------------------- residents */
+
+.residents {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 0.35s var(--ease);
+}
+
+.residents.away {
+  opacity: 0;
+}
+
+.res {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  transform-origin: 50% 100%;
+  transition: opacity 0.3s;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
+}
+
+.res svg {
+  display: block;
+  overflow: visible;
+}
+
+.res-z {
+  position: absolute;
+  right: -4px;
+  top: -6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #c9d4ff;
+  animation: res-z 2.4s ease-in-out infinite;
+}
+
+@keyframes res-z {
+  0% {
+    opacity: 0;
+    transform: translate(0, 4px) scale(0.7);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(6px, -10px) scale(1.15);
+  }
+}
+
+.res-steam path {
+  animation: res-steam 2.2s ease-in-out infinite;
+}
+
+.res-steam path:nth-child(2) {
+  animation-delay: 0.4s;
+}
+
+.res-steam path:nth-child(3) {
+  animation-delay: 0.8s;
+}
+
+@keyframes res-steam {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: translateY(1px);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
+}
+
+.res-blink {
+  animation: res-blink 1.6s steps(2) infinite;
+}
+
+@keyframes res-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.res-wings {
+  transform-origin: 16px 12px;
+  animation: res-wings 0.18s ease-in-out infinite alternate;
+}
+
+@keyframes res-wings {
+  to {
+    transform: scaleY(0.75);
+  }
+}
+
+.res-drop {
+  animation: res-drop 1.8s ease-in infinite;
+}
+
+@keyframes res-drop {
+  0% {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+/* picker in settings */
+.res-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  padding: 10px;
+}
+
+.res-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 6px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-size: 11.5px;
+  color: var(--muted);
+  opacity: 0.55;
+  transition:
+    opacity 0.15s,
+    background 0.15s;
+}
+
+.res-pick:hover {
+  opacity: 0.9;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.res-pick.on {
+  opacity: 1;
+  color: var(--text);
+  background: var(--raised);
+  border-color: rgba(255, 255, 255, 0.08);
+}

@@ -79,6 +79,9 @@ pub struct Settings {
     /// Panel tabs «Текст» (text tools) and «Заметки».
     pub text_enabled: bool,
     pub notes_enabled: bool,
+    /// «Жильцы»: little creatures living at the island (ids of the chosen ones).
+    pub residents_enabled: bool,
+    pub residents: Vec<String>,
 }
 
 impl Default for Settings {
@@ -110,6 +113,8 @@ impl Default for Settings {
             downloads_enabled: true,
             text_enabled: true,
             notes_enabled: true,
+            residents_enabled: true,
+            residents: vec!["jelly".into(), "cat".into(), "ghost".into()],
         }
     }
 }
