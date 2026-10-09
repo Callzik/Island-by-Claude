@@ -70,8 +70,8 @@ export default function App({ boot }: { boot: InitPayload }) {
   const [suppressed, setSuppressed] = useState(false);
 
   // latest values for long-lived event listeners
-  const live = useRef({ panelOpen, pinned, launcherOpen, drop, settings, media, armed: true, lmb: false, busy: false });
-  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media };
+  const live = useRef({ panelOpen, pinned, launcherOpen, drop, settings, media, armed: true, lmb: false, busy: false, toastActions: false });
+  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media, toastActions: !!toast?.actions?.length };
 
   const mode: Mode = suppressed
     ? "hidden"
@@ -191,7 +191,11 @@ export default function App({ boot }: { boot: InitPayload }) {
   const showToast = useCallback((t: ToastData, ms = 2400) => {
     setToast(t);
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), ms);
+    toastTimer.current = window.setTimeout(() => setToast(null), t.ms ?? ms);
+  }, []);
+  const hideToast = useCallback(() => {
+    window.clearTimeout(toastTimer.current);
+    setToast(null);
   }, []);
 
   const peekTimer = useRef(0);
@@ -266,11 +270,11 @@ export default function App({ boot }: { boot: InitPayload }) {
           s.armed = true;
           window.clearTimeout(leaveT);
           leaveT = 0;
-          if (!s.panelOpen && !s.launcherOpen && !s.drop && s.settings.hoverExpand && !c.lmb && !enterT) {
+          if (!s.panelOpen && !s.launcherOpen && !s.drop && !s.toastActions && s.settings.hoverExpand && !c.lmb && !enterT) {
             enterT = window.setTimeout(() => {
               enterT = 0;
               const n = live.current;
-              if (!n.panelOpen && !n.launcherOpen && !n.drop) openPanel(undefined, true);
+              if (!n.panelOpen && !n.launcherOpen && !n.drop && !n.toastActions) openPanel(undefined, true);
             }, 200);
           }
         } else {
@@ -304,6 +308,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<Volume>("volume", setVolume));
     subs.push(on<Clip[]>("clips", setClips));
     subs.push(on<boolean>("suppressed", setSuppressed));
+    subs.push(on<ToastData>("toast", (t) => showToast(t, t.ms ?? 3000)));
     subs.push(
       on<boolean>("launcher", (open) => {
         if (open) openLauncher();
@@ -362,7 +367,7 @@ export default function App({ boot }: { boot: InitPayload }) {
 
   useEffect(() => {
     if (boot.hotkeyError)
-      showToast({ icon: "error", tone: "error", title: `${boot.settings.hotkey} занято`, subtitle: "Назначьте другое сочетание в настройках" }, 6000);
+      showToast({ icon: "error", tone: "error", title: "Сочетание клавиш занято", subtitle: boot.hotkeyError }, 6000);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -401,7 +406,7 @@ export default function App({ boot }: { boot: InitPayload }) {
       case "peek":
         return media ? <Peek media={media} cover={cover.url} /> : null;
       case "toast":
-        return toast ? <Toast data={toast} /> : null;
+        return toast ? <Toast data={toast} onDone={hideToast} /> : null;
       case "drop":
         return <DropZones zone={drop?.zone ?? null} count={drop?.paths.length ?? 0} />;
       case "panel":
@@ -448,9 +453,10 @@ export default function App({ boot }: { boot: InitPayload }) {
       default:
         return null;
     }
-  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, setBusy, bumpUsage]);
+  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage]);
 
   const onIslandClick = () => {
+    if (mode === "toast" && toast?.actions?.length) return;
     if (mode === "idle" || mode === "music" || mode === "peek" || mode === "toast") openPanel("home", true);
   };
 

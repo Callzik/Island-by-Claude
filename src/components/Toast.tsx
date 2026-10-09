@@ -1,25 +1,62 @@
-import { IAlert, ICheck, ICopy, IInbox, ILauncher } from "./Icons";
+import { call } from "../api";
+import { IAlert, ICheck, ICopy, IImage, IInbox, ILauncher, IPipette, IQr, IText } from "./Icons";
+
+export interface ToastAction {
+  label: string;
+  cmd: string;
+  args?: Record<string, unknown>;
+}
 
 export interface ToastData {
-  icon: "shelf" | "launcher" | "copy" | "check" | "error";
+  icon: "shelf" | "launcher" | "copy" | "check" | "error" | "image" | "text" | "qr" | "color";
   title: string;
   subtitle?: string;
   tone?: "error";
+  /** thumbnail (data url) shown instead of the icon */
+  image?: string;
+  /** colour sample shown instead of the icon */
+  swatch?: string;
+  actions?: ToastAction[];
+  /** how long to show, ms */
+  ms?: number;
 }
 
-const ICONS = { shelf: IInbox, launcher: ILauncher, copy: ICopy, check: ICheck, error: IAlert };
+const ICONS = { shelf: IInbox, launcher: ILauncher, copy: ICopy, check: ICheck, error: IAlert, image: IImage, text: IText, qr: IQr, color: IPipette };
 
-export function Toast({ data }: { data: ToastData }) {
-  const Icon = ICONS[data.icon];
+export function Toast({ data, onDone }: { data: ToastData; onDone?: () => void }) {
+  const Icon = ICONS[data.icon] ?? ICheck;
   return (
     <div className={`toast ${data.tone === "error" ? "toast-error" : ""}`}>
-      <div className="toast-icon">
-        <Icon size={20} />
-      </div>
+      {data.image ? (
+        <img className="toast-thumb" src={data.image} alt="" draggable={false} />
+      ) : data.swatch ? (
+        <div className="toast-swatch" style={{ background: data.swatch }} />
+      ) : (
+        <div className="toast-icon">
+          <Icon size={20} />
+        </div>
+      )}
       <div className="toast-text">
         <div className="toast-title">{data.title}</div>
         {data.subtitle && <div className="toast-sub">{data.subtitle}</div>}
       </div>
+      {data.actions && data.actions.length > 0 && (
+        <div className="toast-actions">
+          {data.actions.map((a) => (
+            <button
+              key={a.label}
+              className="toast-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                call(a.cmd, a.args ?? {}).catch(() => {});
+                onDone?.();
+              }}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

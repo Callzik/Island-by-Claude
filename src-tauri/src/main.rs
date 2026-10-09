@@ -17,12 +17,12 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, EventTarget, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use clips::{ClipEntry, ClipStore, ClipView};
-use native::{audio::Audio, clip, img, input, media::Media, shell, util};
+use native::{audio::Audio, capture, clip, img, input, media::Media, shell, util};
 use store::{load_json, save_json, Data, Paths, PinItem, Settings, ShelfItem};
 
 /// Logical size of the transparent window the island lives in.
@@ -178,8 +178,70 @@ struct Shared {
     shell: ShellWorker,
     icons: Mutex<HashMap<String, Option<String>>>,
     apps: Mutex<Option<Vec<AppItem>>>,
-    hotkey: Mutex<String>,
+    /// action -> registered combo
+    hotkeys: Mutex<HashMap<String, String>>,
     hotkey_error: Mutex<Option<String>>,
+    /// Frozen screen shown by the capture overlay.
+    shot: Mutex<Option<Shot>>,
+    shot_seq: AtomicU32,
+    capturing: AtomicBool,
+}
+
+/// A monitor snapshot (physical pixels, top-down BGRA).
+struct Shot {
+    id: u32,
+    mode: String,
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+    bgra: Arc<Vec<u8>>,
+    bmp: Arc<Vec<u8>>,
+}
+
+#[derive(Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct ToastAction {
+    label: String,
+    cmd: String,
+    args: serde_json::Value,
+}
+
+/// Toast shown by the island (sent to the main window).
+#[derive(Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct ToastPayload {
+    icon: String,
+    title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subtitle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    image: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    swatch: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    actions: Vec<ToastAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ms: Option<u32>,
+}
+
+fn toast(app: &AppHandle, t: ToastPayload) {
+    let _ = app.emit_to(EventTarget::webview_window("main"), "toast", t);
+}
+
+fn toast_error(app: &AppHandle, title: &str, subtitle: &str) {
+    toast(
+        app,
+        ToastPayload {
+            icon: "error".into(),
+            tone: Some("error".into()),
+            title: title.into(),
+            subtitle: Some(subtitle.into()),
+            ..Default::default()
+        },
+    );
 }
 
 type St<'a> = State<'a, Arc<Shared>>;
@@ -224,34 +286,53 @@ fn toggle_launcher(app: &AppHandle) {
     set_launcher(app, open);
 }
 
-fn bind_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
-    app.global_shortcut()
-        .on_shortcut(hotkey, |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                toggle_launcher(app);
-            }
-        })
-        .map_err(|e| e.to_string())
+/// (action, combo) pairs wanted by the settings.
+fn hotkey_bindings(s: &Settings) -> Vec<(&'static str, String)> {
+    let mut v = vec![("launcher", s.hotkey.clone())];
+    if s.capture_enabled {
+        v.push(("region", s.hotkey_region.clone()));
+        v.push(("ocr", s.hotkey_ocr.clone()));
+    }
+    v.retain(|(_, c)| !c.trim().is_empty());
+    v
 }
 
-/// Must run on the main thread (RegisterHotKey is thread-affine).
-fn rebind_hotkey(app: &AppHandle, shared: &Shared, hotkey: &str) -> Result<(), String> {
-    let old = lock(&shared.hotkey).clone();
-    if !old.is_empty() {
-        let _ = app.global_shortcut().unregister(old.as_str());
+fn run_hotkey(app: &AppHandle, action: &str) {
+    match action {
+        "launcher" => toggle_launcher(app),
+        "region" | "ocr" => begin_capture(app.clone(), action.to_string()),
+        _ => {}
     }
-    match bind_hotkey(app, hotkey) {
-        Ok(()) => {
-            *lock(&shared.hotkey) = hotkey.to_string();
-            Ok(())
+}
+
+/// Re-registers every global shortcut. Must run on the main thread (RegisterHotKey
+/// is thread-affine). Returns the shortcuts that could not be registered.
+fn apply_hotkeys(app: &AppHandle, shared: &Shared, settings: &Settings) -> Vec<String> {
+    let gs = app.global_shortcut();
+    let mut cur = lock(&shared.hotkeys);
+    for (_, combo) in cur.drain() {
+        let _ = gs.unregister(combo.as_str());
+    }
+    let mut errors = Vec::new();
+    for (action, combo) in hotkey_bindings(settings) {
+        if cur.values().any(|c| c.eq_ignore_ascii_case(&combo)) {
+            errors.push(format!("«{combo}» назначено дважды"));
+            continue;
         }
-        Err(e) => {
-            if !old.is_empty() {
-                let _ = bind_hotkey(app, &old);
+        let act = action.to_string();
+        let res = gs.on_shortcut(combo.as_str(), move |app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                run_hotkey(app, &act);
             }
-            Err(format!("Не удалось назначить «{hotkey}»: {e}"))
+        });
+        match res {
+            Ok(()) => {
+                cur.insert(action.to_string(), combo);
+            }
+            Err(e) => errors.push(format!("«{combo}»: {e}")),
         }
     }
+    errors
 }
 
 fn apply_autostart(app: &AppHandle, enabled: bool) {
@@ -596,9 +677,19 @@ fn save_settings(app: AppHandle, state: St<'_>, settings: Settings) -> Result<Se
     if next.hotkey.trim().is_empty() {
         next.hotkey = old.hotkey.clone();
     }
+    if next.hotkey_region.trim().is_empty() {
+        next.hotkey_region = old.hotkey_region.clone();
+    }
+    if next.hotkey_ocr.trim().is_empty() {
+        next.hotkey_ocr = old.hotkey_ocr.clone();
+    }
     let failed_before = lock(&state.hotkey_error).is_some();
-    if next.hotkey != old.hotkey || failed_before {
-        rebind_hotkey(&app, &state, &next.hotkey)?;
+    if hotkey_bindings(&next) != hotkey_bindings(&old) || failed_before {
+        let errors = apply_hotkeys(&app, &state, &next);
+        if !errors.is_empty() {
+            let _ = apply_hotkeys(&app, &state, &old);
+            return Err(format!("Не удалось назначить {}", errors.join(", ")));
+        }
         *lock(&state.hotkey_error) = None;
     }
     if next.autostart != old.autostart {
@@ -748,14 +839,6 @@ async fn open_target(state: St<'_>, target: String, count: Option<bool>) -> Resu
 async fn reveal(state: St<'_>, path: String) -> Result<bool, String> {
     let worker = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || worker.shell.run(move || shell::reveal(&path)).unwrap_or(false))
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn snip(state: St<'_>) -> Result<bool, String> {
-    let worker = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || worker.shell.run(|| shell::open("ms-screenclip:")).unwrap_or(false))
         .await
         .map_err(|e| e.to_string())
 }
@@ -988,6 +1071,290 @@ fn quit(app: AppHandle) {
 }
 
 // ---------------------------------------------------------------------------
+// Screen capture overlay
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct OverlayStart {
+    id: u32,
+    mode: String,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+struct PxRect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+fn build_overlay(app: &AppHandle) -> tauri::Result<()> {
+    let win = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("index.html#overlay".into()))
+        .title("Island — захват")
+        .decorations(false)
+        .resizable(false)
+        .skip_taskbar(true)
+        .always_on_top(true)
+        .shadow(false)
+        .focused(false)
+        .visible(false)
+        .build()?;
+    if let Ok(h) = win.hwnd() {
+        input::make_tool_window(h.0 as isize);
+    }
+    Ok(())
+}
+
+/// Takes a snapshot of the monitor under the cursor (without our own windows).
+fn snapshot(shared: &Shared, mode: &str) -> Option<Shot> {
+    let own = shared.own_hwnd.load(Ordering::Relaxed);
+    let (cx, cy) = input::cursor_pos();
+    let (x, y, w, h) = capture::monitor_at(cx, cy);
+    capture::exclude_from_capture(own, true);
+    thread::sleep(Duration::from_millis(60));
+    let px = capture::grab(x, y, w, h);
+    capture::exclude_from_capture(own, false);
+    let bgra = Arc::new(px?);
+    let bmp = Arc::new(capture::bmp(&bgra, w, h));
+    Some(Shot {
+        id: shared.shot_seq.fetch_add(1, Ordering::Relaxed) + 1,
+        mode: mode.to_string(),
+        x,
+        y,
+        w,
+        h,
+        bgra,
+        bmp,
+    })
+}
+
+fn end_overlay(app: &AppHandle, shared: &Shared) {
+    if let Some(ov) = app.get_webview_window("overlay") {
+        let _ = ov.emit_to(EventTarget::webview_window("overlay"), "overlay-end", ());
+        let _ = ov.hide();
+    }
+    *lock(&shared.shot) = None;
+    shared.capturing.store(false, Ordering::Relaxed);
+}
+
+/// Region / full screen / text / QR / colour picker. Runs off the main thread.
+fn begin_capture(app: AppHandle, mode: String) {
+    let shared = app.state::<Arc<Shared>>().inner().clone();
+    if !lock(&shared.settings).capture_enabled || shared.capturing.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    thread::spawn(move || {
+        let Some(shot) = snapshot(&shared, &mode) else {
+            shared.capturing.store(false, Ordering::Relaxed);
+            toast_error(&app, "Не удалось снять экран", "");
+            return;
+        };
+        if mode == "full" {
+            let (w, h) = (shot.w, shot.h);
+            let bgra = shot.bgra.clone();
+            shared.capturing.store(false, Ordering::Relaxed);
+            finish_image(&app, &shared, &bgra, w, h);
+            return;
+        }
+        let start = OverlayStart {
+            id: shot.id,
+            mode: mode.clone(),
+            width: shot.w,
+            height: shot.h,
+        };
+        let (x, y, w, h) = (shot.x, shot.y, shot.w, shot.h);
+        *lock(&shared.shot) = Some(shot);
+        let Some(ov) = app.get_webview_window("overlay") else {
+            shared.capturing.store(false, Ordering::Relaxed);
+            return;
+        };
+        let _ = ov.set_position(PhysicalPosition::new(x, y));
+        let _ = ov.set_size(PhysicalSize::new(w, h));
+        let id = start.id;
+        let _ = app.emit_to(EventTarget::webview_window("overlay"), "overlay-start", start);
+        // the overlay page never answered: don't stay stuck in "capturing"
+        thread::sleep(Duration::from_secs(4));
+        let stuck = lock(&shared.shot).as_ref().map(|s| s.id) == Some(id) && !ov.is_visible().unwrap_or(false);
+        if stuck {
+            end_overlay(&app, &shared);
+            toast_error(&app, "Оверлей не открылся", "Попробуйте ещё раз");
+        }
+    });
+}
+
+/// Screenshot → clipboard + Pictures\Screenshots\Island-*.png + toast with a thumbnail.
+fn finish_image(app: &AppHandle, shared: &Shared, bgra: &[u8], w: u32, h: u32) {
+    let rgba = capture::bgra_to_rgba(bgra);
+    let Some(png) = img::encode_png(w, h, &rgba) else {
+        toast_error(app, "Не удалось сохранить скриншот", "");
+        return;
+    };
+    let copied = clip::write_image(w, h, &rgba, Some(&png));
+    if copied {
+        shared.clip_skip_seq.store(clip::sequence(), Ordering::Relaxed);
+    }
+    let name = format!("Island-{}.png", capture::local_stamp());
+    let path = capture::screenshots_dir().map(|d| d.join(&name));
+    let saved = path.as_ref().map(|p| fs::write(p, &png).is_ok()).unwrap_or(false);
+    let (tw, th, thumb) = img::shrink(w, h, &rgba, 120);
+    let image = img::encode_png(tw, th, &thumb).map(|b| util::data_url("image/png", &b));
+    let mut actions = Vec::new();
+    if let (true, Some(p)) = (saved, &path) {
+        actions.push(ToastAction {
+            label: "Показать".into(),
+            cmd: "reveal".into(),
+            args: serde_json::json!({ "path": p.to_string_lossy() }),
+        });
+    }
+    toast(
+        app,
+        ToastPayload {
+            icon: "image".into(),
+            title: "Скриншот готов".into(),
+            subtitle: Some(match (copied, saved) {
+                (true, true) => format!("В буфере · {w} × {h}"),
+                (true, false) => "В буфере · файл не сохранился".into(),
+                (false, true) => "Сохранён в «Снимки экрана»".into(),
+                (false, false) => "Не удалось сохранить".into(),
+            }),
+            image,
+            actions,
+            ms: Some(4200),
+            ..Default::default()
+        },
+    );
+}
+
+fn finish_ocr(app: &AppHandle, shared: &Shared, bgra: Vec<u8>, w: u32, h: u32) {
+    // WinRT OCR wants an MTA thread
+    let text = thread::spawn(move || {
+        let _com = util::Com::mta();
+        capture::ocr(&bgra, w, h)
+    })
+    .join()
+    .ok()
+    .and_then(|r| r.ok())
+    .unwrap_or_default();
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        toast_error(app, "Текст не найден", "Попробуйте выделить крупнее");
+        return;
+    }
+    let n = text.chars().count();
+    if clip::write_text(&text) {
+        let _ = shared;
+        toast(
+            app,
+            ToastPayload {
+                icon: "text".into(),
+                title: format!("Текст распознан · {n} симв."),
+                subtitle: Some(text.lines().next().unwrap_or("").chars().take(60).collect()),
+                ms: Some(3200),
+                ..Default::default()
+            },
+        );
+    } else {
+        toast_error(app, "Не удалось скопировать", "");
+    }
+}
+
+fn finish_qr(app: &AppHandle, bgra: &[u8], w: u32, h: u32) {
+    let Some(content) = capture::qr(bgra, w, h) else {
+        toast_error(app, "QR-код не найден", "Выделите код целиком");
+        return;
+    };
+    let content = content.trim().to_string();
+    let is_url = content.starts_with("http://") || content.starts_with("https://");
+    let _ = clip::write_text(&content);
+    let short: String = content.chars().take(60).collect();
+    toast(
+        app,
+        ToastPayload {
+            icon: "qr".into(),
+            title: if is_url { "Ссылка из QR-кода".into() } else { "QR-код скопирован".into() },
+            subtitle: Some(short),
+            actions: if is_url {
+                vec![ToastAction {
+                    label: "Открыть".into(),
+                    cmd: "open_target".into(),
+                    args: serde_json::json!({ "target": content, "count": false }),
+                }]
+            } else {
+                Vec::new()
+            },
+            ms: Some(if is_url { 6000 } else { 3200 }),
+            ..Default::default()
+        },
+    );
+}
+
+#[tauri::command]
+fn capture(app: AppHandle, mode: String) {
+    begin_capture(app, mode);
+}
+
+/// The overlay has the snapshot on screen: show it and take focus (for Esc).
+#[tauri::command]
+fn overlay_show(app: AppHandle, state: St<'_>, id: u32) {
+    if lock(&state.shot).as_ref().map(|s| s.id) != Some(id) {
+        return;
+    }
+    if let Some(ov) = app.get_webview_window("overlay") {
+        let _ = ov.show();
+        let _ = ov.set_focus();
+    }
+}
+
+#[tauri::command]
+fn capture_cancel(app: AppHandle, state: St<'_>) {
+    end_overlay(&app, &state);
+    input::activate(state.last_fg.load(Ordering::Relaxed));
+}
+
+/// `rect` is in snapshot pixels; `color` comes from the picker.
+#[tauri::command]
+fn capture_finish(app: AppHandle, state: St<'_>, id: u32, rect: Option<PxRect>, color: Option<String>) {
+    let shot = lock(&state.shot).take();
+    end_overlay(&app, &state);
+    input::activate(state.last_fg.load(Ordering::Relaxed));
+    let Some(shot) = shot.filter(|s| s.id == id) else { return };
+    let shared = state.inner().clone();
+    thread::spawn(move || {
+        if shot.mode == "picker" {
+            let Some(hex) = color else { return };
+            let _ = clip::write_text(&hex);
+            toast(
+                &app,
+                ToastPayload {
+                    icon: "color".into(),
+                    title: hex.clone(),
+                    subtitle: Some("Цвет скопирован".into()),
+                    swatch: Some(hex),
+                    ms: Some(3000),
+                    ..Default::default()
+                },
+            );
+            return;
+        }
+        // whole screen when nothing was selected (QR: a click scans everything)
+        let r = rect.unwrap_or(PxRect { x: 0.0, y: 0.0, w: shot.w as f64, h: shot.h as f64 });
+        let x = r.x.max(0.0).min(shot.w as f64 - 1.0) as u32;
+        let y = r.y.max(0.0).min(shot.h as f64 - 1.0) as u32;
+        let w = (r.w.round() as u32).clamp(1, shot.w - x);
+        let h = (r.h.round() as u32).clamp(1, shot.h - y);
+        let px = capture::crop(&shot.bgra, shot.w, x, y, w, h);
+        match shot.mode.as_str() {
+            "ocr" => finish_ocr(&app, &shared, px, w, h),
+            "qr" => finish_qr(&app, &px, w, h),
+            _ => finish_image(&app, &shared, &px, w, h),
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Tray & entry point
 // ---------------------------------------------------------------------------
 
@@ -1040,6 +1407,23 @@ fn main() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_drag::init())
+        // http://shot.localhost/<id> — the frozen screen for the capture overlay
+        .register_uri_scheme_protocol("shot", |ctx, req| {
+            let shared = ctx.app_handle().state::<Arc<Shared>>();
+            let want: u32 = req.uri().path().trim_matches('/').parse().unwrap_or(0);
+            let body = lock(&shared.shot)
+                .as_ref()
+                .filter(|s| s.id == want)
+                .map(|s| s.bmp.as_ref().clone());
+            let builder = tauri::http::Response::builder()
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Cache-Control", "no-store");
+            match body {
+                Some(b) => builder.header("Content-Type", "image/bmp").body(b),
+                None => builder.status(404).body(Vec::new()),
+            }
+            .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+        })
         .setup(|app| {
             let paths = Paths::new(app.path().app_data_dir()?);
             let first_run = !paths.settings().exists();
@@ -1070,8 +1454,11 @@ fn main() {
                 shell: ShellWorker::spawn(),
                 icons: Mutex::new(HashMap::new()),
                 apps: Mutex::new(None),
-                hotkey: Mutex::new(String::new()),
+                hotkeys: Mutex::new(HashMap::new()),
                 hotkey_error: Mutex::new(None),
+                shot: Mutex::new(None),
+                shot_seq: AtomicU32::new(0),
+                capturing: AtomicBool::new(false),
             });
             app.manage(shared.clone());
 
@@ -1079,8 +1466,9 @@ fn main() {
                 save_json(&shared.paths.settings(), &settings);
                 apply_autostart(app.handle(), settings.autostart);
             }
-            if let Err(e) = rebind_hotkey(app.handle(), &shared, &settings.hotkey) {
-                *lock(&shared.hotkey_error) = Some(e);
+            let errors = apply_hotkeys(app.handle(), &shared, &settings);
+            if !errors.is_empty() {
+                *lock(&shared.hotkey_error) = Some(errors.join(", "));
             }
 
             let win = app.get_webview_window("main").ok_or("main window is missing")?;
@@ -1095,6 +1483,7 @@ fn main() {
             let _ = win.set_ignore_cursor_events(true);
 
             build_tray(app.handle())?;
+            build_overlay(app.handle())?;
 
             spawn_cursor_thread(app.handle().clone(), shared.clone());
             spawn_media_thread(app.handle().clone(), shared.clone(), media_rx);
@@ -1115,7 +1504,6 @@ fn main() {
             get_icons,
             open_target,
             reveal,
-            snip,
             pick_files,
             shelf_add,
             shelf_remove,
@@ -1132,6 +1520,10 @@ fn main() {
             clip_clear,
             lock_screen,
             record_screen,
+            capture,
+            overlay_show,
+            capture_cancel,
+            capture_finish,
             quit
         ])
         .run(tauri::generate_context!())

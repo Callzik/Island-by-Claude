@@ -54,6 +54,10 @@ pub struct Settings {
     pub clip_limit: usize,
     /// Liquid pull towards the cursor.
     pub cursor_pull: bool,
+    /// Screen capture overlay (region, text, QR, colour picker) and its hotkeys.
+    pub capture_enabled: bool,
+    pub hotkey_region: String,
+    pub hotkey_ocr: String,
 }
 
 impl Default for Settings {
@@ -66,6 +70,9 @@ impl Default for Settings {
             hover_expand: true,
             clip_limit: 200,
             cursor_pull: true,
+            capture_enabled: true,
+            hotkey_region: "Ctrl+Shift+S".into(),
+            hotkey_ocr: "Ctrl+Shift+T".into(),
         }
     }
 }

@@ -157,10 +157,7 @@ export function Home(p: PanelProps) {
   const capture = (mode: "region" | "full" | "ocr" | "qr" | "picker") => {
     p.onClose();
     // let the panel fold before the screen is captured
-    window.setTimeout(() => {
-      if (mode === "region") call("snip");
-      else p.toast({ icon: "check", title: "Скоро", subtitle: "Появится вместе с оверлеем захвата" });
-    }, 250);
+    window.setTimeout(() => call("capture", { mode }), 280);
   };
   const addPins = async () => {
     p.setBusy(true);

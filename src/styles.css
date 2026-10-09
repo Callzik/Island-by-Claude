@@ -1422,3 +1422,190 @@ input::placeholder {
     filter: blur(5px);
   }
 }
+
+/* ------------------------------------------------------- toast extras */
+
+.toast-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--raised);
+}
+
+.toast-swatch {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.toast-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.toast-btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.toast-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* --------------------------------------------------------- capture overlay */
+
+html.is-overlay,
+html.is-overlay body {
+  background: #000;
+}
+
+.ov-root {
+  position: fixed;
+  inset: 0;
+  cursor: crosshair;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.ov-root.ready {
+  opacity: 1;
+}
+
+.ov-shot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.ov-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  pointer-events: none;
+}
+
+.ov-sel {
+  position: absolute;
+  box-shadow:
+    0 0 0 1.5px #fff,
+    0 0 0 9999px rgba(0, 0, 0, 0.42);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.ov-size {
+  position: absolute;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: rgba(10, 10, 12, 0.86);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.ov-cross-h,
+.ov-cross-v {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+
+.ov-cross-h {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+.ov-cross-v {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.ov-hint {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 9px 16px;
+  border-radius: 14px;
+  background: rgba(14, 14, 16, 0.88);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ov-hint span {
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 500;
+}
+
+.ov-loupe {
+  position: absolute;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-loupe canvas {
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.ov-loupe-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border-radius: 9px;
+  background: rgba(10, 10, 12, 0.88);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-loupe-label i {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+.settings-section {
+  grid-column: 1 / -1;
+  padding: 8px 4px 0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.settings-section:first-child {
+  padding-top: 0;
+}

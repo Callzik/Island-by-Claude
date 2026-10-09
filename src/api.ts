@@ -15,6 +15,9 @@ export interface Settings {
   hoverExpand: boolean;
   clipLimit: number;
   cursorPull: boolean;
+  captureEnabled: boolean;
+  hotkeyRegion: string;
+  hotkeyOcr: string;
 }
 
 export interface ShelfItem {

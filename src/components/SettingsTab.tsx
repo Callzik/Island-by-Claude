@@ -104,6 +104,7 @@ export function SettingsTab({
   return (
     <div className="settings">
       <div className="settings-grid">
+        <div className="settings-section">Основное</div>
         {rows.map((r) => (
           <div className="setting" key={r.key}>
             <div>
@@ -141,6 +142,29 @@ export function SettingsTab({
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="settings-section">Захват экрана</div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Оверлей захвата</div>
+            <div className="setting-sub">Область, текст, QR-код, пипетка</div>
+          </div>
+          <Toggle checked={settings.captureEnabled} onChange={(v) => set("captureEnabled", v)} />
+        </div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Снимок области</div>
+            <div className="setting-sub">PNG в буфер и в «Снимки экрана»</div>
+          </div>
+          <HotkeyField value={settings.hotkeyRegion} onChange={(v) => set("hotkeyRegion", v)} setBusy={setBusy} />
+        </div>
+        <div className="setting">
+          <div>
+            <div className="setting-title">Текст с экрана</div>
+            <div className="setting-sub">Распознать и скопировать</div>
+          </div>
+          <HotkeyField value={settings.hotkeyOcr} onChange={(v) => set("hotkeyOcr", v)} setBusy={setBusy} />
         </div>
       </div>
       <div className="settings-foot">

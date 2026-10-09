@@ -27,6 +27,9 @@ const state = {
     hoverExpand: true,
     clipLimit: 200,
     cursorPull: true,
+    captureEnabled: true,
+    hotkeyRegion: "Ctrl+Shift+S",
+    hotkeyOcr: "Ctrl+Shift+T",
   },
   data: {
     shelf: [
@@ -133,6 +136,18 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       return r(null);
     case "pick_files":
       return r([]);
+    case "capture": {
+      // the real overlay is a separate window; here the result is simulated
+      const demo: Record<string, unknown> = {
+        region: { icon: "image", title: "Скриншот готов", subtitle: "В буфере · 463 × 463", image: cover, actions: [{ label: "Показать", cmd: "reveal", args: {} }], ms: 4200 },
+        full: { icon: "image", title: "Скриншот готов", subtitle: "В буфере · 2560 × 1440", image: cover, actions: [{ label: "Показать", cmd: "reveal", args: {} }], ms: 4200 },
+        ocr: { icon: "text", title: "Текст распознан · 128 симв.", subtitle: "Встречу перенесли на четверг, 15:00", ms: 3200 },
+        qr: { icon: "qr", title: "Ссылка из QR-кода", subtitle: "https://github.com/Callzik", actions: [{ label: "Открыть", cmd: "open_target", args: {} }], ms: 6000 },
+        picker: { icon: "color", title: "#D97757", subtitle: "Цвет скопирован", swatch: "#D97757", ms: 3000 },
+      };
+      setTimeout(() => mockEmit("toast", demo[args.mode as string] ?? demo.region), 500);
+      return r(null);
+    }
     case "open_launcher":
       mockEmit("launcher", true);
       return r(null);
