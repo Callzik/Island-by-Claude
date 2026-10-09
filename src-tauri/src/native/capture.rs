@@ -15,7 +15,7 @@ use windows::Win32::Graphics::Gdi::{
     MONITOR_DEFAULTTONEAREST, SRCCOPY,
 };
 use windows::Win32::System::SystemInformation::GetLocalTime;
-use windows::Win32::UI::Shell::{FOLDERID_Downloads, FOLDERID_Pictures, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
+use windows::Win32::UI::Shell::{FOLDERID_Downloads, FOLDERID_Pictures, FOLDERID_Videos, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
 use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE};
 
 use super::util::{hwnd, take_pwstr};
@@ -35,6 +35,19 @@ pub fn monitor_at(x: i32, y: i32) -> (i32, i32, u32, u32) {
             (0, 0, 1920, 1080)
         }
     }
+}
+
+/// Raw HMONITOR of the monitor that contains the point (for screen recording).
+pub fn monitor_handle_at(x: i32, y: i32) -> *mut c_void {
+    unsafe { MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST) }.0
+}
+
+/// %USERPROFILE%\Videos\Island (created if missing).
+pub fn videos_dir() -> Option<std::path::PathBuf> {
+    let v = unsafe { SHGetKnownFolderPath(&FOLDERID_Videos, KF_FLAG_DEFAULT, None) }.ok()?;
+    let dir = std::path::PathBuf::from(take_pwstr(v)).join("Island");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
 }
 
 /// Copies a screen rectangle; returns top-down BGRA pixels.

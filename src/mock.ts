@@ -167,6 +167,10 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
         qr: { icon: "qr", title: "Ссылка из QR-кода", subtitle: "https://github.com/Callzik", actions: [{ label: "Открыть", cmd: "open_target", args: {} }], ms: 6000 },
         picker: { icon: "color", title: "#D97757", subtitle: "Цвет скопирован", swatch: "#D97757", ms: 3000 },
       };
+      if (args.mode === "record") {
+        setTimeout(() => mockEmit("recording", { active: true, startedMs: Date.now() }), 400);
+        return r(null);
+      }
       setTimeout(() => mockEmit("toast", demo[args.mode as string] ?? demo.region), 500);
       return r(null);
     }
@@ -222,6 +226,20 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       }
       return r(null);
     }
+    case "record_stop":
+      mockEmit("recording", { active: false, startedMs: 0 });
+      setTimeout(
+        () =>
+          mockEmit("toast", {
+            icon: "video",
+            title: "Запись сохранена",
+            subtitle: "Island-20261009-204500.mp4 · Видео\\Island",
+            actions: [{ label: "Показать в папке", cmd: "reveal", args: {} }],
+            ms: 6000,
+          }),
+        300,
+      );
+      return r(null);
     case "audio_devices":
       return r([
         { id: "a", name: "Динамики (Realtek(R) Audio)", default: state.volume.device === "Динамики" },

@@ -89,6 +89,12 @@ export const ITextTool = (p: P) => (
     <path d="M14.5 13.5h6M17.5 11v8" />
   </Svg>
 );
+export const IVideo = (p: P) => (
+  <Svg {...p}>
+    <rect x="3.5" y="6.5" width="12" height="11" rx="2.5" />
+    <path d="m15.5 10.5 5-3v9l-5-3" />
+  </Svg>
+);
 export const IClipboard = (p: P) => (
   <Svg {...p}>
     <rect x="5" y="4.5" width="14" height="16" rx="2.5" />

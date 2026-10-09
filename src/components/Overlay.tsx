@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent as RMouseEven
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { call, isTauri, on } from "../api";
 
-type Mode = "region" | "ocr" | "qr" | "picker";
+type Mode = "region" | "ocr" | "qr" | "picker" | "record";
 
 interface Start {
   id: number;
@@ -19,6 +19,7 @@ const HINTS: Record<Mode, string> = {
   ocr: "Выделите текст для распознавания",
   qr: "Выделите QR-код или кликните — поиск по всему экрану",
   picker: "Кликните, чтобы взять цвет",
+  record: "Выделите область для записи или кликните — весь экран",
 };
 
 const ZOOM_PX = 11; // source pixels across the loupe
@@ -162,7 +163,7 @@ export function Overlay() {
     const h = Math.abs(drag.y1 - drag.y0);
     if (w < 4 || h < 4) {
       setDrag(null);
-      if (start.mode === "qr") finish(null);
+      if (start.mode === "qr" || start.mode === "record") finish(null);
       return;
     }
     finish({ x: Math.round(x * k), y: Math.round(y * k), w: Math.round(w * k), h: Math.round(h * k) });

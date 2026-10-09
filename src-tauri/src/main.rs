@@ -3,6 +3,7 @@
 
 mod ai;
 mod clips;
+mod record;
 mod downloads;
 mod native;
 mod store;
@@ -197,6 +198,14 @@ struct Shared {
     weather_wake: Mutex<Sender<()>>,
     voice_tx: Mutex<Sender<VoiceCmd>>,
     voice_active: AtomicBool,
+    recording: Mutex<Option<record::Recording>>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RecordingState {
+    active: bool,
+    started_ms: i64,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1633,6 +1642,69 @@ fn finish_qr(app: &AppHandle, bgra: &[u8], w: u32, h: u32) {
     );
 }
 
+fn recording_state(app: &AppHandle, active: bool, started_ms: i64) {
+    let _ = app.emit_to(EventTarget::webview_window("main"), "recording", RecordingState { active, started_ms });
+}
+
+/// Starts an MP4 recording of the snapshot's monitor (or a part of it).
+fn start_recording(app: &AppHandle, shared: &Arc<Shared>, shot: &Shot, rect: Option<(u32, u32, u32, u32)>) {
+    if lock(&shared.recording).is_some() {
+        return;
+    }
+    let Some(dir) = capture::videos_dir() else {
+        toast_error(app, "Нет папки «Видео»", "");
+        return;
+    };
+    let path = dir.join(format!("Island-{}.mp4", capture::local_stamp()));
+    let hmon = capture::monitor_handle_at(shot.x + shot.w as i32 / 2, shot.y + shot.h as i32 / 2);
+    // the island (red dot and timer) stays out of the video
+    capture::exclude_from_capture(shared.own_hwnd.load(Ordering::Relaxed), true);
+    match record::start(hmon, shot.w, shot.h, rect, path) {
+        Ok(rec) => {
+            *lock(&shared.recording) = Some(rec);
+            recording_state(app, true, store::now_ms());
+        }
+        Err(e) => {
+            capture::exclude_from_capture(shared.own_hwnd.load(Ordering::Relaxed), false);
+            toast_error(app, "Не удалось начать запись", &e);
+        }
+    }
+}
+
+/// Stop button / click on the island while recording.
+#[tauri::command]
+async fn record_stop(app: AppHandle, state: St<'_>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    let Some(rec) = lock(&shared.recording).take() else { return Ok(()) };
+    recording_state(&app, false, 0);
+    let result = tauri::async_runtime::spawn_blocking(move || rec.finish())
+        .await
+        .map_err(|e| e.to_string())?;
+    capture::exclude_from_capture(shared.own_hwnd.load(Ordering::Relaxed), false);
+    match result {
+        Ok(path) => {
+            let name = store::file_name(&path.to_string_lossy());
+            toast(
+                &app,
+                ToastPayload {
+                    icon: "video".into(),
+                    title: "Запись сохранена".into(),
+                    subtitle: Some(format!("{name} · Видео\\Island")),
+                    actions: vec![ToastAction {
+                        label: "Показать в папке".into(),
+                        cmd: "reveal".into(),
+                        args: serde_json::json!({ "path": path.to_string_lossy() }),
+                    }],
+                    ms: Some(6000),
+                    ..Default::default()
+                },
+            );
+        }
+        Err(e) => toast_error(&app, "Запись не сохранилась", &e),
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn capture(app: AppHandle, mode: String) {
     begin_capture(app, mode);
@@ -1679,6 +1751,15 @@ fn capture_finish(app: AppHandle, state: St<'_>, id: u32, rect: Option<PxRect>, 
                     ..Default::default()
                 },
             );
+            return;
+        }
+        if shot.mode == "record" {
+            let rect = rect.map(|r| {
+                let x = r.x.max(0.0) as u32;
+                let y = r.y.max(0.0) as u32;
+                (x.min(shot.w - 2), y.min(shot.h - 2), r.w.max(2.0) as u32, r.h.max(2.0) as u32)
+            });
+            start_recording(&app, &shared, &shot, rect);
             return;
         }
         // whole screen when nothing was selected (QR: a click scans everything)
@@ -1986,6 +2067,7 @@ fn main() {
                 weather_wake: Mutex::new(weather_tx),
                 voice_tx: Mutex::new(voice_tx),
                 voice_active: AtomicBool::new(false),
+                recording: Mutex::new(None),
             });
             app.manage(shared.clone());
 
@@ -2056,6 +2138,7 @@ fn main() {
             overlay_show,
             capture_cancel,
             capture_finish,
+            record_stop,
             ai_models,
             ai_attach,
             ai_send,

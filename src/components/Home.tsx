@@ -197,7 +197,7 @@ function PinButton({ pin, onRemove }: { pin: PinItem; onRemove: () => void }) {
 }
 
 export function Home(p: PanelProps) {
-  const capture = (mode: "region" | "full" | "ocr" | "qr" | "picker") => {
+  const capture = (mode: "region" | "full" | "ocr" | "qr" | "picker" | "record") => {
     p.onClose();
     // let the panel fold before the screen is captured
     window.setTimeout(() => call("capture", { mode }), 280);
@@ -236,20 +236,7 @@ export function Home(p: PanelProps) {
             if (!ok) p.toast({ icon: "error", tone: "error", title: "В буфере нет текста" });
           }}
         />
-        <Action
-          icon={IRecord}
-          label="Запись экрана"
-          onClick={async () => {
-            p.onClose();
-            const ok = await call<boolean>("record_screen");
-            p.toast(
-              ok
-                ? { icon: "check", title: "Запись экрана", subtitle: "Xbox Game Bar · Win+Alt+R — стоп" }
-                : { icon: "error", tone: "error", title: "Не удалось начать запись" },
-              3200,
-            );
-          }}
-        />
+        <Action icon={IRecord} label="Запись экрана" onClick={() => capture("record")} />
         <Action icon={ICommand} label="Команда" onClick={p.onLauncher} />
       </div>
       <div className="card dock">

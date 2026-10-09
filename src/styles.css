@@ -2818,3 +2818,50 @@ html.is-overlay body {
   color: var(--text);
   border-color: rgba(255, 255, 255, 0.12);
 }
+
+/* -------------------------------------------------------- screen recording */
+
+.rec {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 14px 3px 14px;
+  color: var(--text);
+}
+
+.rec-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #ff4d4d;
+  animation: rec-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes rec-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.rec-time {
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.rec-stop {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.rec:hover .rec-stop {
+  color: var(--text);
+  background: rgba(255, 77, 77, 0.35);
+}

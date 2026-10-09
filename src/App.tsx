@@ -28,8 +28,9 @@ import { WeatherCompact } from "./components/Weather";
 import { VoicePill, type VoiceState } from "./components/VoicePill";
 import { DownloadPill, type DownloadProgress } from "./components/DownloadPill";
 import { Residents, type IslandBox } from "./components/Residents";
+import { RecPill, type RecordingState } from "./components/RecPill";
 
-type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher" | "voice" | "download";
+type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher" | "voice" | "download" | "rec";
 
 const BOX: Record<Exclude<Mode, "launcher">, { w: number; h: number; r: number }> = {
   hidden: { w: 0, h: 0, r: 0 },
@@ -41,6 +42,7 @@ const BOX: Record<Exclude<Mode, "launcher">, { w: number; h: number; r: number }
   panel: { w: 820, h: 440, r: 30 },
   voice: { w: 330, h: 46, r: 23 },
   download: { w: 360, h: 48, r: 24 },
+  rec: { w: 196, h: 40, r: 20 },
 };
 
 const LAUNCHER_W = 680;
@@ -74,6 +76,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   const [weather, setWeather] = useState<WeatherPayload | null>(boot.weather ?? null);
   const [voice, setVoice] = useState<VoiceState>({ state: "idle", startedMs: 0 });
   const [download, setDownload] = useState<DownloadProgress | null>(null);
+  const [rec, setRec] = useState<RecordingState>({ active: false, startedMs: 0 });
   const chatDrop = useRef<((paths: string[]) => void) | null>(null);
   const setChatDrop = useCallback((fn: ((paths: string[]) => void) | null) => {
     chatDrop.current = fn;
@@ -88,12 +91,14 @@ export default function App({ boot }: { boot: InitPayload }) {
 
   // latest values for long-lived event listeners
   const live = useRef({ panelOpen, pinned, launcherOpen, drop, settings, media, armed: true, lmb: false, busy: false, toastActions: false, tab: "home" as Tab });
-  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media, toastActions: !!toast?.actions?.length || voice.state !== "idle", tab };
+  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media, toastActions: !!toast?.actions?.length || voice.state !== "idle" || rec.active, tab };
 
   const mode: Mode = suppressed
     ? "hidden"
     : voice.state !== "idle"
       ? "voice"
+      : rec.active && !launcherOpen && !panelOpen && !drop
+        ? "rec"
       : launcherOpen
       ? "launcher"
       : drop
@@ -183,6 +188,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     const rimFor = (): LiquidTarget["rim"] => {
       switch (mode) {
         case "voice":
+        case "rec":
           return [255, 77, 77, 0.95];
         case "download":
           return [110, 180, 255, 0.85];
@@ -365,6 +371,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<ToastData>("toast", (t) => showToast(t, t.ms ?? 3000)));
     subs.push(on<WeatherPayload>("weather", setWeather));
     subs.push(on<VoiceState>("voice", setVoice));
+    subs.push(on<RecordingState>("recording", setRec));
     subs.push(on<DownloadProgress | null>("download", setDownload));
     subs.push(on<ShelfItem[]>("shelf", setShelf));
     subs.push(
@@ -467,6 +474,8 @@ export default function App({ boot }: { boot: InitPayload }) {
     switch (mode) {
       case "voice":
         return <VoicePill voice={voice} />;
+      case "rec":
+        return <RecPill rec={rec} />;
       case "download":
         return download ? <DownloadPill d={download} /> : null;
       case "idle":
@@ -529,10 +538,11 @@ export default function App({ boot }: { boot: InitPayload }) {
       default:
         return null;
     }
-  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather, voice, download]);
+  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather, voice, download, rec]);
 
   const onIslandClick = () => {
     if ((mode === "toast" && toast?.actions?.length) || mode === "voice") return;
+    if (mode === "rec") return void call("record_stop");
     if (mode === "download") return openPanel("shelf", true);
     if (mode === "idle" || mode === "music" || mode === "peek" || mode === "toast") openPanel("home", true);
   };
