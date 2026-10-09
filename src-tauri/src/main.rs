@@ -962,6 +962,21 @@ fn clip_clear(app: AppHandle, state: St<'_>) {
     let _ = app.emit("clips", views);
 }
 
+/// "Запись экрана": Xbox Game Bar records the active window / screen.
+#[tauri::command]
+async fn record_screen(state: St<'_>) -> Result<bool, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        // Game Bar records the foreground app, so give focus back first.
+        input::activate(shared.last_fg.load(Ordering::Relaxed));
+        thread::sleep(Duration::from_millis(150));
+        input::toggle_game_bar_recording();
+        true
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn lock_screen() -> bool {
     input::lock_workstation()
@@ -1116,6 +1131,7 @@ fn main() {
             clip_pin,
             clip_clear,
             lock_screen,
+            record_screen,
             quit
         ])
         .run(tauri::generate_context!())

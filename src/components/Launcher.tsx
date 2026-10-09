@@ -4,7 +4,7 @@ import { calculate, formatNumber, plainNumber } from "../lib/calc";
 import { score } from "../lib/fuzzy";
 import { useIcon } from "../lib/icons";
 import { convertCurrency, convertUnits, ensureRates } from "../lib/units";
-import { ICalc, IEnter, IFile, IFolder, IGlobe, ISearch, ISwap } from "./Icons";
+import { ICalc, IEnter, IFile, IFolder, IGlobe, ILock, ISearch, ISwap } from "./Icons";
 import type { ToastData } from "./Toast";
 
 interface Row {
@@ -27,6 +27,17 @@ function RowIcon({ target, glyph }: { target?: string; glyph?: ReactNode }) {
   if (url) return <img className="row-icon" src={url} alt="" draggable={false} />;
   return <span className="row-icon glyph">{/\.[a-z0-9]+$/i.test(target) && !target.startsWith("app:") ? <IFile size={18} /> : <IFolder size={18} />}</span>;
 }
+
+/** Built-in commands, found by any of their words. */
+const COMMANDS: { id: string; title: string; words: string[]; glyph: ReactNode; cmd: string }[] = [
+  {
+    id: "cmd:lock",
+    title: "Заблокировать компьютер",
+    words: ["блокировка", "заблокировать", "lock", "экран блокировки", "выйти из-за компьютера"],
+    glyph: <ILock size={19} />,
+    cmd: "lock_screen",
+  },
+];
 
 const looksLikeUrl = (q: string) => /^(https?:\/\/)?([\w-]+\.)+[a-zа-я]{2,}(\/\S*)?$/i.test(q.trim()) && !/\s/.test(q.trim());
 
@@ -105,6 +116,21 @@ export function Launcher({
       const cur = convertCurrency(query);
       if (cur === "pending") out.push({ id: "cur", glyph: <ISwap size={19} />, title: "Загружаю курсы валют…", hint: "", run: () => {} });
       else if (cur) out.push({ id: "cur", glyph: <ISwap size={19} />, title: cur.text, hint: "Курс валют · Enter — скопировать", run: () => copy(cur.copy, cur.text) });
+    }
+
+    for (const c of COMMANDS) {
+      const s = Math.max(score(c.title, query), ...c.words.map((w) => score(w, query)));
+      if (s >= 300)
+        out.push({
+          id: c.id,
+          glyph: c.glyph,
+          title: c.title,
+          hint: "Команда",
+          run: () => {
+            onClose(false);
+            window.setTimeout(() => call(c.cmd), 150);
+          },
+        });
     }
 
     type Cand = { target: string; name: string; hint: string; s: number };

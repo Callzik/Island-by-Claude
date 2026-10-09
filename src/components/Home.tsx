@@ -4,7 +4,7 @@ import { css } from "../lib/color";
 import { clock } from "../lib/format";
 import { useIcon } from "../lib/icons";
 import { Cover } from "./Compact";
-import { ICommand, IEraser, ILock, IMute, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose } from "./Icons";
+import { ICommand, IEraser, IFullscreen, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose } from "./Icons";
 import type { PanelProps } from "./Panel";
 
 function useTicker(active: boolean, ms = 250) {
@@ -154,6 +154,14 @@ function PinButton({ pin, onRemove }: { pin: PinItem; onRemove: () => void }) {
 }
 
 export function Home(p: PanelProps) {
+  const capture = (mode: "region" | "full" | "ocr" | "qr" | "picker") => {
+    p.onClose();
+    // let the panel fold before the screen is captured
+    window.setTimeout(() => {
+      if (mode === "region") call("snip");
+      else p.toast({ icon: "check", title: "Скоро", subtitle: "Появится вместе с оверлеем захвата" });
+    }, 250);
+  };
   const addPins = async () => {
     p.setBusy(true);
     try {
@@ -174,14 +182,11 @@ export function Home(p: PanelProps) {
         <VolumeRow volume={p.volume} setBusy={p.setBusy} />
       </div>
       <div className="actions">
-        <Action
-          icon={IRegion}
-          label="Область"
-          onClick={() => {
-            p.onClose();
-            window.setTimeout(() => call("snip"), 250);
-          }}
-        />
+        <Action icon={IRegion} label="Область" onClick={() => capture("region")} />
+        <Action icon={IFullscreen} label="Весь экран" onClick={() => capture("full")} />
+        <Action icon={IScanText} label="Текст с экрана" onClick={() => capture("ocr")} />
+        <Action icon={IQr} label="QR-код" onClick={() => capture("qr")} />
+        <Action icon={IPipette} label="Пипетка" onClick={() => capture("picker")} />
         <Action
           icon={IEraser}
           label="Чистый текст"
@@ -191,15 +196,21 @@ export function Home(p: PanelProps) {
             if (!ok) p.toast({ icon: "error", tone: "error", title: "В буфере нет текста" });
           }}
         />
-        <Action icon={ICommand} label="Команда" onClick={p.onLauncher} />
         <Action
-          icon={ILock}
-          label="Блокировка"
-          onClick={() => {
+          icon={IRecord}
+          label="Запись экрана"
+          onClick={async () => {
             p.onClose();
-            call("lock_screen");
+            const ok = await call<boolean>("record_screen");
+            p.toast(
+              ok
+                ? { icon: "check", title: "Запись экрана", subtitle: "Xbox Game Bar · Win+Alt+R — стоп" }
+                : { icon: "error", tone: "error", title: "Не удалось начать запись" },
+              3200,
+            );
           }}
         />
+        <Action icon={ICommand} label="Команда" onClick={p.onLauncher} />
       </div>
       <div className="card dock">
         {p.pins.map((pin) => (

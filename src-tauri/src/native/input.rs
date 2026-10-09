@@ -7,7 +7,7 @@ use windows::Win32::System::Shutdown::LockWorkStation;
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-    VIRTUAL_KEY, VK_CONTROL, VK_LBUTTON, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
+    VIRTUAL_KEY, VK_CONTROL, VK_LBUTTON, VK_LWIN, VK_MENU, VK_R, VK_RWIN, VK_SHIFT, VK_V,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindow,
@@ -90,6 +90,26 @@ pub fn send_paste() {
     unsafe {
         SendInput(&inputs, size_of::<INPUT>() as i32);
     }
+}
+
+/// Presses `keys` in order and releases them in reverse (e.g. Win+Alt+R).
+pub fn send_combo(keys: &[VIRTUAL_KEY]) {
+    let mut inputs: Vec<INPUT> = Vec::new();
+    for vk in [VK_MENU, VK_SHIFT, VK_CONTROL, VK_LWIN, VK_RWIN] {
+        if key_down(vk) {
+            inputs.push(key(vk, true));
+        }
+    }
+    inputs.extend(keys.iter().map(|&k| key(k, false)));
+    inputs.extend(keys.iter().rev().map(|&k| key(k, true)));
+    unsafe {
+        SendInput(&inputs, size_of::<INPUT>() as i32);
+    }
+}
+
+/// Starts / stops Xbox Game Bar screen recording (Win+Alt+R).
+pub fn toggle_game_bar_recording() {
+    send_combo(&[VK_LWIN, VK_MENU, VK_R]);
 }
 
 /// Hides the window from Alt+Tab and the taskbar.

@@ -178,6 +178,39 @@ export const IRegion = (p: P) => (
     <path d="m12.5 12.5 7.5 2.8-3.2 1.4-1.4 3.2z" />
   </Svg>
 );
+export const IFullscreen = (p: P) => (
+  <Svg {...p}>
+    <rect x="3.5" y="5" width="17" height="12" rx="2" />
+    <path d="M9 20h6M12 17v3" />
+    <path d="M7 9.5V8h1.5M17 9.5V8h-1.5M7 12.5V14h1.5M17 12.5V14h-1.5" />
+  </Svg>
+);
+export const IScanText = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" />
+    <path d="M8 9h8M12 9v7" />
+  </Svg>
+);
+export const IQr = (p: P) => (
+  <Svg {...p}>
+    <rect x="4" y="4" width="6" height="6" rx="1" />
+    <rect x="14" y="4" width="6" height="6" rx="1" />
+    <rect x="4" y="14" width="6" height="6" rx="1" />
+    <path d="M14 14h2.5v2.5H14zM18.5 14H20M20 18.5V20h-3.5M14 19.5V20" />
+  </Svg>
+);
+export const IPipette = (p: P) => (
+  <Svg {...p}>
+    <path d="m14.5 6.5 3 3" />
+    <path d="M16 5l1.6-1.6a2 2 0 0 1 2.8 2.8L19 7.8M16.5 4.5l3 3L9 18l-4 1 1-4z" />
+  </Svg>
+);
+export const IRecord = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="8" />
+    <circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
+  </Svg>
+);
 export const IEraser = (p: P) => (
   <Svg {...p}>
     <path d="m14.5 4.5 5 5a1.5 1.5 0 0 1 0 2.1L12 19H7.5l-3-3a1.5 1.5 0 0 1 0-2.1l7.9-9.4a1.5 1.5 0 0 1 2.1 0z" />
