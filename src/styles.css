@@ -120,6 +120,25 @@ input::placeholder {
   }
 }
 
+/* outgoing content of the previous state: fades while the shape collapses */
+.island-inner.island-ghost {
+  pointer-events: none;
+  animation: content-out 0.2s var(--ease) both;
+}
+
+@keyframes content-out {
+  from {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(-50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    filter: blur(5px);
+    transform: translateX(-50%) scale(0.97);
+  }
+}
+
 /* --------------------------------------------------------- compact states */
 
 .cover {

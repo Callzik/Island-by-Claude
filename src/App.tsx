@@ -40,6 +40,9 @@ const LAUNCHER_W = 680;
 export default function App({ boot }: { boot: InitPayload }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const clipRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  // DOM snapshot of the previous state's content, faded out while the shape morphs
+  const ghostRef = useRef<{ mode: Mode; node: Node | null }>({ mode: "hidden", node: null });
   const liquidRef = useRef<Liquid | null>(null);
 
   const [settings, setSettings] = useState<Settings>(boot.settings);
@@ -84,7 +87,27 @@ export default function App({ boot }: { boot: InitPayload }) {
                 ? "music"
                 : "idle";
 
+  if (ghostRef.current.mode !== mode) {
+    // render runs before the DOM swap: the old content is still in the document
+    ghostRef.current = { mode, node: innerRef.current ? innerRef.current.cloneNode(true) : null };
+  }
+
   const box = mode === "launcher" ? { w: LAUNCHER_W, h: launcherH, r: 26 } : BOX[mode];
+
+  useLayoutEffect(() => {
+    const node = ghostRef.current.node as HTMLElement | null;
+    const host = clipRef.current;
+    ghostRef.current.node = null;
+    if (!node || !host || !node.childNodes.length) return;
+    node.classList.add("island-ghost");
+    node.removeAttribute("id");
+    host.appendChild(node);
+    const t = window.setTimeout(() => node.remove(), 260);
+    return () => {
+      window.clearTimeout(t);
+      node.remove();
+    };
+  }, [mode]);
 
   // ---- liquid canvas -------------------------------------------------------
   useLayoutEffect(() => {
@@ -424,7 +447,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     <div className={`root ${suppressed ? "is-hidden" : ""}`}>
       <canvas ref={canvasRef} className="liquid" />
       <div ref={clipRef} className={`island mode-${mode}`} onClick={onIslandClick}>
-        <div className="island-inner" style={{ width: box.w, height: box.h }} key={mode}>
+        <div ref={innerRef} className="island-inner" style={{ width: box.w, height: box.h }} key={mode}>
           {content}
         </div>
       </div>
