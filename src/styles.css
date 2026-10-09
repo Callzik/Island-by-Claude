@@ -1297,17 +1297,21 @@ input::placeholder {
 .c-lyric .w::after {
   content: attr(data-t);
   position: absolute;
-  left: 0;
-  top: 0;
+  /* 12px of room around the glyphs: the glow fades out inside the box
+     instead of being cut off at its edges (that showed as a dark rectangle) */
+  left: -12px;
+  top: -12px;
+  padding: 12px;
   white-space: nowrap;
   color: #fff;
   pointer-events: none;
+  /* 100% = word + 24px; the soft 16px edge sweeps across the word itself */
   -webkit-mask-image: linear-gradient(
     90deg,
-    #000 calc(var(--p) * (100% + 16px) - 16px),
-    transparent calc(var(--p) * (100% + 16px))
+    #000 calc(var(--p) * (100% - 8px) - 4px),
+    transparent calc(var(--p) * (100% - 8px) + 12px)
   );
-  mask-image: linear-gradient(90deg, #000 calc(var(--p) * (100% + 16px) - 16px), transparent calc(var(--p) * (100% + 16px)));
+  mask-image: linear-gradient(90deg, #000 calc(var(--p) * (100% - 8px) - 4px), transparent calc(var(--p) * (100% - 8px) + 12px));
   transition: text-shadow 0.35s var(--ease);
 }
 
