@@ -67,6 +67,11 @@ export const IMic = (p: P) => (
     <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" />
   </Svg>
 );
+export const IDownload = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5 19.5h14" />
+  </Svg>
+);
 export const IClipboard = (p: P) => (
   <Svg {...p}>
     <rect x="5" y="4.5" width="14" height="16" rx="2.5" />

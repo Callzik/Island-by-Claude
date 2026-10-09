@@ -15,7 +15,7 @@ use windows::Win32::Graphics::Gdi::{
     MONITOR_DEFAULTTONEAREST, SRCCOPY,
 };
 use windows::Win32::System::SystemInformation::GetLocalTime;
-use windows::Win32::UI::Shell::{FOLDERID_Pictures, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
+use windows::Win32::UI::Shell::{FOLDERID_Downloads, FOLDERID_Pictures, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
 use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE};
 
 use super::util::{hwnd, take_pwstr};
@@ -143,6 +143,12 @@ pub fn screenshots_dir() -> Option<std::path::PathBuf> {
     let dir = std::path::PathBuf::from(take_pwstr(pics)).join("Screenshots");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
+}
+
+/// The user's Downloads folder.
+pub fn downloads_dir() -> Option<std::path::PathBuf> {
+    let p = unsafe { SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None) }.ok()?;
+    Some(std::path::PathBuf::from(take_pwstr(p)))
 }
 
 /// Recognises text with the Windows OCR engine of the user's languages.

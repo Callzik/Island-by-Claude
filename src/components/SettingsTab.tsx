@@ -255,6 +255,7 @@ export function SettingsTab({
     { key: "musicReactive", title: "Волна под музыку", sub: "Край острова дрожит в такт звуку" },
     { key: "cursorPull", title: "Тянуться к курсору", sub: "Жидкий край вытягивается навстречу" },
     { key: "hideFullscreen", title: "Прятать в полноэкранных приложениях", sub: "Игры, видео, презентации" },
+    { key: "downloadsEnabled", title: "Загрузки браузера", sub: "Прогресс в острове, «Загружено» → открыть или на полку" },
   ];
 
   return (

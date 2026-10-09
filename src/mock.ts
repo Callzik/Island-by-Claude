@@ -46,6 +46,7 @@ const state = {
     voiceWhisperUrl: "",
     voiceWhisperKey: "",
     voiceWhisperModel: "whisper-1",
+    downloadsEnabled: true,
   },
   data: {
     shelf: [
@@ -289,5 +290,28 @@ if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ === und
     const beat = Math.abs(Math.sin(t * 3.1)) * 0.55 + Math.random() * 0.35;
     mockEmit("audio", Math.min(1, beat));
   }, 50);
-  (window as any).__mock = { emit: mockEmit, state };
+  // demo download: window.__mock.download()
+  const download = () => {
+    let bytes = 0;
+    const t = setInterval(() => {
+      bytes += 14 * 1024 * 1024 * 0.25 * (0.8 + Math.random() * 0.4);
+      if (bytes > 2.4 * 1024 ** 3 || bytes > 180 * 1024 ** 2) {
+        clearInterval(t);
+        mockEmit("download", null);
+        mockEmit("toast", {
+          icon: "download",
+          title: "Загружено",
+          subtitle: "ubuntu-24.04-desktop.iso · 180 МБ",
+          actions: [
+            { label: "Открыть", cmd: "open_target", args: {} },
+            { label: "На полку", cmd: "shelf_add", args: { paths: ["C:\\Users\\me\\Downloads\\ubuntu-24.04-desktop.iso"] } },
+          ],
+          ms: 7000,
+        });
+        return;
+      }
+      mockEmit("download", { name: "ubuntu-24.04-desktop.iso", bytes, speed: 14 * 1024 * 1024, count: 1 });
+    }, 250);
+  };
+  (window as any).__mock = { emit: mockEmit, state, download };
 }

@@ -3,6 +3,7 @@
 
 mod ai;
 mod clips;
+mod downloads;
 mod native;
 mod store;
 mod voice;
@@ -848,6 +849,92 @@ fn spawn_voice_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<VoiceCmd
         .expect("failed to start voice thread");
 }
 
+/// Browser downloads in the Downloads folder (notify wakes us, sizes are polled
+/// while something is downloading).
+fn spawn_downloads_thread(app: AppHandle, shared: Arc<Shared>) {
+    thread::Builder::new()
+        .name("downloads".into())
+        .spawn(move || {
+            use notify::{RecursiveMode, Watcher as _};
+            let Some(dir) = capture::downloads_dir() else { return };
+            let (tx, rx) = channel::<()>();
+            let mut fs_watch = match notify::recommended_watcher(move |_res: notify::Result<notify::Event>| {
+                let _ = tx.send(());
+            }) {
+                Ok(w) => w,
+                Err(_) => return,
+            };
+            if fs_watch.watch(&dir, RecursiveMode::NonRecursive).is_err() {
+                return;
+            }
+            let mut w = downloads::Watcher::new(dir);
+            let mut last: Option<downloads::Progress> = None;
+            loop {
+                let wait = if w.active() { Duration::from_millis(700) } else { Duration::from_secs(30) };
+                match rx.recv_timeout(wait) {
+                    Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+                // a burst of fs events → one scan
+                thread::sleep(Duration::from_millis(120));
+                while rx.try_recv().is_ok() {}
+                if !lock(&shared.settings).downloads_enabled {
+                    if last.take().is_some() {
+                        let _ = app.emit("download", None::<downloads::Progress>);
+                    }
+                    continue;
+                }
+                let (progress, finished) = w.scan();
+                if progress != last {
+                    let _ = app.emit("download", progress.clone());
+                    last = progress;
+                }
+                for f in finished {
+                    let name = store::file_name(&f.path.to_string_lossy());
+                    let path = f.path.to_string_lossy().to_string();
+                    toast(
+                        &app,
+                        ToastPayload {
+                            icon: "download".into(),
+                            title: "Загружено".into(),
+                            subtitle: Some(format!("{name} · {}", downloads_size(f.size))),
+                            actions: vec![
+                                ToastAction {
+                                    label: "Открыть".into(),
+                                    cmd: "open_target".into(),
+                                    args: serde_json::json!({ "target": path, "count": false }),
+                                },
+                                ToastAction {
+                                    label: "На полку".into(),
+                                    cmd: "shelf_add".into(),
+                                    args: serde_json::json!({ "paths": [path] }),
+                                },
+                            ],
+                            ms: Some(7000),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        })
+        .expect("failed to start downloads thread");
+}
+
+fn downloads_size(b: u64) -> String {
+    let b = b as f64;
+    let (v, u) = if b >= 1024f64.powi(3) {
+        (b / 1024f64.powi(3), "ГБ")
+    } else if b >= 1024f64.powi(2) {
+        (b / 1024f64.powi(2), "МБ")
+    } else if b >= 1024.0 {
+        (b / 1024.0, "КБ")
+    } else {
+        (b, "Б")
+    };
+    let s = if v < 10.0 && u != "Б" { format!("{v:.1}") } else { format!("{v:.0}") };
+    format!("{} {u}", s.replace('.', ","))
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -1086,7 +1173,7 @@ async fn pick_files(state: St<'_>, title: String) -> Result<Vec<String>, String>
 }
 
 #[tauri::command]
-fn shelf_add(state: St<'_>, paths: Vec<String>) -> Vec<ShelfItem> {
+fn shelf_add(app: AppHandle, state: St<'_>, paths: Vec<String>) -> Vec<ShelfItem> {
     let mut d = lock(&state.data);
     for p in paths {
         if d.shelf.iter().any(|s| s.path == p) {
@@ -1097,6 +1184,7 @@ fn shelf_add(state: St<'_>, paths: Vec<String>) -> Vec<ShelfItem> {
         }
     }
     save_json(&state.paths.data(), &*d);
+    let _ = app.emit("shelf", d.shelf.clone());
     d.shelf.clone()
 }
 
@@ -1868,6 +1956,7 @@ fn main() {
             spawn_clip_thread(app.handle().clone(), shared.clone());
             spawn_weather_thread(app.handle().clone(), shared.clone(), weather_rx);
             spawn_voice_thread(app.handle().clone(), shared.clone(), voice_rx);
+            spawn_downloads_thread(app.handle().clone(), shared.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
