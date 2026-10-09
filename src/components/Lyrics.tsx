@@ -3,6 +3,7 @@ import { call } from "../api";
 import { css } from "../lib/color";
 import { useLyricSync } from "../lib/useLyrics";
 import type { PanelProps } from "./Panel";
+import { LyricWords } from "./Compact";
 
 export function Lyrics({ media, mediaAt, accent, lyrics }: Pick<PanelProps, "media" | "mediaAt" | "accent" | "lyrics">) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -101,11 +102,7 @@ export function Lyrics({ media, mediaAt, accent, lyrics }: Pick<PanelProps, "med
               style={{ "--d": d } as CSSProperties}
               onClick={() => call("media_control", { action: "seek", value: l.t }).catch(() => {})}
             >
-              {l.words.map((w, k) => (
-                <span key={k}>
-                  <span className="w">{w.text}</span>{" "}
-                </span>
-              ))}
+              <LyricWords words={l.words} />
             </div>
           );
         })}

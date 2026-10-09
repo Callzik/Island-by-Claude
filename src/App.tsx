@@ -131,6 +131,10 @@ export default function App({ boot }: { boot: InitPayload }) {
         : BOX[mode];
 
   useLayoutEffect(() => {
+    placeContent();
+  });
+
+  useLayoutEffect(() => {
     const node = ghostRef.current.node as HTMLElement | null;
     const host = clipRef.current;
     ghostRef.current.node = null;
@@ -162,6 +166,21 @@ export default function App({ boot }: { boot: InitPayload }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weather, settings.weatherEnabled]);
 
+  // Content sits on whole pixels: the clip box animates with fractional sizes, so
+  // centring by CSS (left: 50% + translateX(-50%)) put text on half pixels and
+  // made it look smeared. Every frame each content layer gets an integer x.
+  const placeContent = useCallback(() => {
+    const el = clipRef.current;
+    if (!el) return;
+    const cx = islandBox.current.cx;
+    const clipLeft = parseFloat(el.style.left) || 0;
+    for (const child of Array.from(el.children)) {
+      if (!(child instanceof HTMLElement) || !child.classList.contains("island-inner")) continue;
+      const cw = parseFloat(child.style.width) || child.offsetWidth;
+      child.style.left = `${Math.round(cx - cw / 2) - clipLeft}px`;
+    }
+  }, []);
+
   // ---- liquid canvas -------------------------------------------------------
   useLayoutEffect(() => {
     const liquid = new Liquid(canvasRef.current!);
@@ -170,10 +189,11 @@ export default function App({ boot }: { boot: InitPayload }) {
       islandBox.current = { cx: liquid.centerX, w, h: Math.max(0, h) };
       const el = clipRef.current;
       if (!el) return;
-      el.style.left = `${liquid.centerX - w / 2}px`;
-      el.style.width = `${w}px`;
+      el.style.left = `${Math.round(liquid.centerX - w / 2)}px`;
+      el.style.width = `${Math.round(w)}px`;
       el.style.height = `${Math.max(0, h)}px`;
       el.style.borderRadius = `0 0 ${r}px ${r}px`;
+      placeContent();
     };
     return () => {
       liquid.destroy();

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "../api";
 import { fetchLyrics, lyricsKey, type LyricLine, type LyricsData } from "./lyrics";
-import { runLyricSync, playbackPos } from "./lyricSync";
+import { runLyricSync, playbackState } from "./lyricSync";
 
 export interface LyricsState {
   status: "idle" | "loading" | "ok" | "none";
@@ -56,6 +56,7 @@ export function useLyricSync(
   media: Media | null,
   mediaAt: number,
   lineEl: (i: number) => HTMLElement | null,
+  onSweep?: (el: HTMLElement, x: number) => void,
 ): number {
   const [idx, setIdx] = useState(-1);
   const mref = useRef(media);
@@ -64,15 +65,18 @@ export function useLyricSync(
   aref.current = mediaAt;
   const eref = useRef(lineEl);
   eref.current = lineEl;
+  const sref = useRef(onSweep);
+  sref.current = onSweep;
 
   useEffect(() => {
     setIdx(-1);
     if (!lines) return;
     return runLyricSync(
       lines,
-      () => playbackPos(mref.current, aref.current),
+      () => playbackState(mref.current, aref.current),
       setIdx,
       (i) => eref.current(i),
+      sref.current ? (el, x) => sref.current?.(el, x) : undefined,
     );
   }, [lines]);
 

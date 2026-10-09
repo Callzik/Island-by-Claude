@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Media } from "../api";
 import { useLyricSync, type LyricsState } from "../lib/useLyrics";
 import { IMusic } from "./Icons";
@@ -13,40 +13,98 @@ function Cover({ url, size, radius }: { url: string | null; size: number; radius
   );
 }
 
+/** Words of a lyric line. Each word carries its text in data-t: the bright copy is
+ *  drawn by ::after on top of the dim word and revealed with a mask, so the glyphs
+ *  stay ordinary crisp text (no background-clip, no scaling). */
+export function LyricWords({ words }: { words: { text: string }[] }) {
+  return (
+    <>
+      {words.map((w, k) => (
+        <span key={k}>
+          <span className="w" data-t={w.text}>
+            {w.text}
+          </span>{" "}
+        </span>
+      ))}
+    </>
+  );
+}
+
+const FONT = 14;
+const FONT_MIN = 12.5;
+
 /** Music playing, island collapsed: artwork on the left, the current lyric line in the middle, bars are drawn on the canvas. */
 export function Compact({ cover, media, mediaAt, lyrics }: { cover: string | null; media: Media | null; mediaAt: number; lyrics: LyricsState }) {
   const lines = lyrics.lines;
   const wrapRef = useRef<HTMLDivElement>(null);
-  const elRef = useRef<HTMLDivElement>(null);
-  const idxRef = useRef(-1);
-  const idx = useLyricSync(lines, media, mediaAt, (i) => (i === idxRef.current ? elRef.current : null));
-  idxRef.current = idx;
-  const line = lines && idx >= 0 ? lines[idx] : null;
+  const els = useRef(new Map<number, HTMLDivElement>());
+  const scroll = useRef<{ el: HTMLElement | null; x: number }>({ el: null, x: 0 });
 
-  // long lines shrink a little to fit the island
-  useLayoutEffect(() => {
-    const el = elRef.current;
+  // long lines: follow the highlight smoothly instead of shrinking the text
+  const onSweep = (el: HTMLElement, sweep: number) => {
     const wrap = wrapRef.current;
-    if (!el || !wrap) return;
-    el.style.setProperty("--fit", "1");
-    const fit = Math.max(0.72, Math.min(1, wrap.clientWidth / Math.max(1, el.scrollWidth)));
-    el.style.setProperty("--fit", String(fit));
+    if (!wrap) return;
+    const s = scroll.current;
+    if (s.el !== el) {
+      s.el = el;
+      s.x = 0;
+    }
+    const over = el.scrollWidth - wrap.clientWidth;
+    const target = over > 0 ? Math.max(0, Math.min(over + 10, sweep - wrap.clientWidth * 0.62)) : 0;
+    s.x += (target - s.x) * 0.08;
+    if (Math.abs(target - s.x) < 0.1) s.x = target;
+    el.style.transform = s.x > 0.05 ? `translateX(${-s.x}px)` : "";
+  };
+
+  const idx = useLyricSync(lines, media, mediaAt, (i) => els.current.get(i) ?? null, onSweep);
+
+  // the current line plus the one fading out
+  const [shown, setShown] = useState<{ i: number; out: boolean }[]>([]);
+  useEffect(() => setShown([]), [lines]);
+  useEffect(() => {
+    setShown((prev) => {
+      const leaving = prev.filter((s) => s.i !== idx).map((s) => ({ ...s, out: true }));
+      const next = leaving.slice(-1);
+      if (idx >= 0) next.push({ i: idx, out: false });
+      return next;
+    });
   }, [idx]);
+
+  // fit: drop the font size a little for long lines (re-rendered, never scaled)
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const el = els.current.get(idx);
+    if (!wrap || !el || el.dataset.fit) return;
+    el.dataset.fit = "1";
+    el.style.fontSize = `${FONT}px`;
+    if (el.scrollWidth > wrap.clientWidth) {
+      const f = Math.max(FONT_MIN, Math.floor((FONT * wrap.clientWidth) / el.scrollWidth * 2) / 2);
+      el.style.fontSize = `${f}px`;
+    }
+  }, [idx, shown]);
 
   return (
     <div className="compact">
       <Cover url={cover} size={24} radius={7} />
       {lines && (
         <div className="c-lyric-wrap" ref={wrapRef}>
-          {line && (
-            <div className="c-lyric" key={idx} ref={elRef}>
-              {line.words.map((w, k) => (
-                <span key={k}>
-                  <span className="w">{w.text}</span>{" "}
-                </span>
-              ))}
-            </div>
-          )}
+          {shown.map(({ i, out }) => {
+            const line = lines[i];
+            if (!line) return null;
+            return (
+              <div className={`c-lyric-slot ${out ? "out" : "in"}`} key={i} onAnimationEnd={() => out && setShown((p) => p.filter((s) => !(s.out && s.i === i)))}>
+                <div
+                  className="c-lyric"
+                  ref={(el) => {
+                    if (el) els.current.set(i, el);
+                    else els.current.delete(i);
+                  }}
+                >
+                  <LyricWords words={line.words} />
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
