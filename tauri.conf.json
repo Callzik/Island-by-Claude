@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Island",
+  "version": "0.3.5",
+  "identifier": "dev.callzik.island",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Island",
+        "url": "index.html",
+        "width": 1000,
+        "height": 640,
+        "x": 0,
+        "y": 0,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "shadow": false,
+        "focus": false,
+        "visible": true,
+        "dragDropEnabled": true,
+        "backgroundColor": "#00000000"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Callzik",
+    "shortDescription": "Жидкий Dynamic Island для Windows",
+    "longDescription": "Island — остров в верхней части экрана: музыка, полка для файлов, история буфера и лаунчер Alt+Space.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Russian", "English"],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}
