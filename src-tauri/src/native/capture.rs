@@ -145,6 +145,20 @@ pub fn local_stamp() -> String {
     )
 }
 
+/// `dir\Island-YYYYMMDD-HHMMSS.ext`, or `… (2).ext` when that name is already
+/// taken (two screenshots within one second must not overwrite each other).
+pub fn unique_file(dir: &std::path::Path, ext: &str) -> std::path::PathBuf {
+    let stamp = local_stamp();
+    let first = dir.join(format!("Island-{stamp}.{ext}"));
+    if !first.exists() {
+        return first;
+    }
+    (2..1000)
+        .map(|n| dir.join(format!("Island-{stamp} ({n}).{ext}")))
+        .find(|p| !p.exists())
+        .unwrap_or(first)
+}
+
 /// %USERPROFILE%\Pictures\Screenshots (created if missing).
 pub fn screenshots_dir() -> Option<std::path::PathBuf> {
     let pics = unsafe { SHGetKnownFolderPath(&FOLDERID_Pictures, KF_FLAG_DEFAULT, None) }.ok()?;

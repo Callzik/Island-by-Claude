@@ -45,22 +45,45 @@ function persist() {
   call("chat_save", { messages: keep }).catch(() => {});
 }
 
+// Streamed pieces are applied at most once per frame: a fast model sends dozens
+// of tiny chunks per second and each one would otherwise re-render the chat.
+const queued = new Map<string, string>();
+let flushT = 0;
+function flush() {
+  flushT = 0;
+  if (!queued.size) return;
+  const add = new Map(queued);
+  queued.clear();
+  // chunks of a reply that was stopped on our side are dropped
+  set({ messages: state.messages.map((m) => (m.pending && add.has(m.id) ? { ...m, text: m.text + add.get(m.id) } : m)) });
+}
+
 function wire() {
   if (wired) return;
   wired = true;
   on<{ id: string; delta: string }>("ai-chunk", ({ id, delta }) => {
-    set({ messages: state.messages.map((m) => (m.id === id ? { ...m, text: m.text + delta } : m)) });
+    queued.set(id, (queued.get(id) ?? "") + delta);
+    if (!flushT) flushT = window.setTimeout(flush, 40);
   });
   on<{ id: string; error: string | null }>("ai-done", ({ id, error }) => {
+    window.clearTimeout(flushT);
+    flush();
+    const msg = state.messages.find((m) => m.id === id);
     set({
       streaming: state.streaming === id ? null : state.streaming,
-      messages: state.messages.map((m) =>
-        m.id === id ? { ...m, pending: false, error: error ?? undefined, text: m.text || (error ? "" : "…") } : m,
-      ),
+      messages: msg?.pending
+        ? state.messages.map((m) => (m.id === id ? { ...m, pending: false, error: error ?? undefined, text: m.text || (error ? "" : "…") } : m))
+        : state.messages,
     });
-    persist();
+    if (msg?.pending) persist();
   });
 }
+
+/** Older turns are sent without their files: every request carries the whole
+ *  dialogue, and a few screenshots would soon overflow a local model's context. */
+const FILES_FOR_LAST = 3;
+/** at most this many earlier messages go with a question */
+const HISTORY = 30;
 
 export const chat = {
   get: () => state,
@@ -76,21 +99,27 @@ export const chat = {
   },
 
   /** OpenAI-style messages for the whole dialogue. */
-  payload(messages: ChatMsg[]) {
+  payload(all: ChatMsg[]) {
     const out: unknown[] = [{ role: "system", content: SYSTEM }];
+    const messages = all.filter((m) => !(m.pending || (m.role === "assistant" && (m.error || !m.text)))).slice(-HISTORY);
+    // a reply can't open the list
+    while (messages.length && messages[0].role === "assistant") messages.shift();
+    let userLeft = messages.filter((m) => m.role === "user").length;
     for (const m of messages) {
-      if (m.pending || (m.role === "assistant" && (m.error || !m.text))) continue;
       if (m.role === "assistant") {
         out.push({ role: "assistant", content: m.text });
         continue;
       }
-      const files = m.attachments ?? [];
+      const recent = userLeft-- <= FILES_FOR_LAST;
+      const files = recent ? (m.attachments ?? []) : [];
+      const dropped = recent ? [] : (m.attachments ?? []);
+      const note = dropped.length ? `\n\n[Ранее прикреплено: ${dropped.map((a) => `«${a.name}»`).join(", ")}]` : "";
       const docs = files
         .filter((a) => a.kind === "text" && a.text)
         .map((a) => `\n\nФайл «${a.name}»:\n\`\`\`\n${a.text}\n\`\`\``)
         .join("");
       const images = files.filter((a) => a.kind === "image" && a.dataUrl);
-      const text = (m.text || (images.length ? "Что на изображении?" : "")) + docs;
+      const text = (m.text || (images.length ? "Что на изображении?" : "")) + docs + note;
       if (!images.length) out.push({ role: "user", content: text });
       else
         out.push({
@@ -120,6 +149,7 @@ export const chat = {
 
   /** Sends the last question again after an error. */
   retry() {
+    if (state.streaming) return;
     const msgs = [...state.messages];
     while (msgs.length && msgs[msgs.length - 1].role === "assistant") msgs.pop();
     const last = msgs.pop();
@@ -128,12 +158,24 @@ export const chat = {
     chat.send(last.text, last.attachments ?? []);
   },
 
+  /** Finishes the reply right away — the server may be stuck loading a model
+   *  and never send another byte. */
   stop() {
-    call("ai_stop").catch(() => {});
+    const id = state.streaming;
+    if (!id) return;
+    call("ai_stop", { id }).catch(() => {});
+    window.clearTimeout(flushT);
+    flush();
+    set({
+      streaming: null,
+      messages: state.messages.map((m) => (m.id === id ? { ...m, pending: false, error: m.text ? undefined : "Остановлено" } : m)),
+    });
+    persist();
   },
 
   clear() {
-    if (state.streaming) call("ai_stop").catch(() => {});
+    if (state.streaming) call("ai_stop", { id: state.streaming }).catch(() => {});
+    queued.clear();
     set({ messages: [], streaming: null });
     persist();
   },

@@ -50,6 +50,8 @@ export function runLyricSync(
   let lastP: number[] = [];
   let shown: number | null = null;
   let last = performance.now();
+  let prevTick = last;
+  let refreshMs = 1000 / 60;
 
   // a line we leave stays fully lit (as when it was sung through)
   const release = () => {
@@ -64,6 +66,12 @@ export function runLyricSync(
 
   const tick = (now: number) => {
     raf = requestAnimationFrame(tick);
+    // ~60–80 fps is plenty for the sweep: on 120 Hz+ monitors skip every other
+    // refresh (60–100 Hz displays update every frame)
+    const d = now - prevTick;
+    prevTick = now;
+    if (d > 0 && d < 50) refreshMs += (d - refreshMs) * 0.1;
+    if (refreshMs < 9 && now - last < 12) return;
     const dt = Math.min(100, Math.max(0, now - last));
     last = now;
 

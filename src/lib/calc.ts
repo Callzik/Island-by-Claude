@@ -128,33 +128,33 @@ class Parser {
   lastPercent = false;
 
   term(): number {
-    let v = this.power();
+    let v = this.unary();
     for (;;) {
       const p = this.peek();
       if (p && p.t === "op" && (p.v === "*" || p.v === "/")) {
         this.next();
-        const rhs = this.power();
+        // a % on the left operand belongs to it: "10%/2" = 0.05, not 500
+        if (this.lastPercent) {
+          v /= 100;
+          this.lastPercent = false;
+        }
+        const rhs = this.unary();
         if (this.lastPercent) {
           this.lastPercent = false;
           v = p.v === "*" ? (v * rhs) / 100 : v / (rhs / 100);
         } else v = p.v === "*" ? v * rhs : v / rhs;
       } else if (p && (p.t === "(" || p.t === "id")) {
         // implicit multiplication: 2(3+4), 2pi
+        if (this.lastPercent) {
+          v /= 100;
+          this.lastPercent = false;
+        }
         v *= this.power();
       } else return v;
     }
   }
 
-  power(): number {
-    const base = this.unary();
-    const p = this.peek();
-    if (p && p.t === "op" && p.v === "^") {
-      this.next();
-      return Math.pow(base, this.power());
-    }
-    return base;
-  }
-
+  /** Sign binds looser than ^: "-3^2" = -9, while "2^-1" still works. */
   unary(): number {
     const p = this.peek();
     if (p && p.t === "op" && (p.v === "-" || p.v === "+")) {
@@ -162,7 +162,18 @@ class Parser {
       const v = this.unary();
       return p.v === "-" ? -v : v;
     }
-    return this.postfix();
+    return this.power();
+  }
+
+  /** Right-associative: "2^3^2" = 2^9. */
+  power(): number {
+    const base = this.postfix();
+    const p = this.peek();
+    if (p && p.t === "op" && p.v === "^") {
+      this.next();
+      return Math.pow(base, this.unary());
+    }
+    return base;
   }
 
   postfix(): number {
@@ -200,7 +211,7 @@ class Parser {
           }
         }
         if (this.next()?.t !== ")") throw new Error(")");
-      } else args.push(this.power());
+      } else args.push(this.unary());
       return fn(...args);
     }
     throw new Error("tok");

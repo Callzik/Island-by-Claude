@@ -7,12 +7,13 @@ use windows::Win32::System::Shutdown::LockWorkStation;
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-    VIRTUAL_KEY, VK_CONTROL, VK_LBUTTON, VK_LWIN, VK_MENU, VK_R, VK_RWIN, VK_SHIFT, VK_V,
+    VIRTUAL_KEY, VK_CONTROL, VK_LBUTTON, VK_LWIN, VK_MENU, VK_R, VK_RBUTTON, VK_RWIN, VK_SHIFT, VK_V,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindow,
-    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_RESTORE, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    GetClassNameW, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect,
+    GetWindowThreadProcessId, IsIconic, IsWindow, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    GWL_EXSTYLE, GWL_STYLE, SM_SWAPBUTTON, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SW_RESTORE, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
 };
 
 use super::util::hwnd;
@@ -29,8 +30,21 @@ fn key_down(vk: VIRTUAL_KEY) -> bool {
     (unsafe { GetAsyncKeyState(vk.0 as i32) } as u16 & 0x8000) != 0
 }
 
+/// The primary (logical left) button. GetAsyncKeyState reads physical buttons,
+/// so with "swap mouse buttons" turned on the primary one is the right key.
 pub fn lmb_down() -> bool {
-    key_down(VK_LBUTTON)
+    let swapped = unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0;
+    key_down(if swapped { VK_RBUTTON } else { VK_LBUTTON })
+}
+
+/// True for any window of this process (island, capture overlay, tray menu…).
+pub fn is_own_process(h: isize) -> bool {
+    if h == 0 {
+        return false;
+    }
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd(h), Some(&mut pid)) };
+    pid != 0 && pid == std::process::id()
 }
 
 pub fn foreground() -> isize {
@@ -146,7 +160,8 @@ fn monitor_rect_of(h: isize) -> Option<RECT> {
 /// (games, videos, presentations).
 pub fn foreground_is_fullscreen(own: isize) -> bool {
     let fg = foreground();
-    if fg == 0 || fg == own {
+    // our own capture overlay covers the monitor too — that is not a game
+    if fg == 0 || fg == own || is_own_process(fg) {
         return false;
     }
     let class = class_name(fg);

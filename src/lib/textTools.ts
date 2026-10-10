@@ -69,7 +69,13 @@ export function fixLayout(s: string): string {
   return s.replace(/\S+/g, (w) => {
     const wl = /[a-z]/i.test(w);
     const wc = /[а-яё]/i.test(w);
-    if (toRu && wl && !wc) return conv(w, EN_RU);
+    if (toRu && wl && !wc) {
+      // "ghbdtn, как дела" → "привет, как дела": in mixed text a trailing comma was
+      // typed after switching layouts. ("?" stays converted — it is «,» on the
+      // Russian layout; "." too — words ending in «ю» are common.)
+      const m = /^(.*[a-z].*?)(,+)$/i.exec(w);
+      return m ? conv(m[1], EN_RU) + m[2] : conv(w, EN_RU);
+    }
     if (!toRu && wc && !wl) return conv(w, RU_EN);
     return w;
   });

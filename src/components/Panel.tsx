@@ -34,7 +34,7 @@ export interface PanelProps {
   pinned: boolean;
   setPinned: (p: boolean) => void;
   settings: Settings;
-  saveSettings: (s: Settings) => void;
+  saveSettings: (patch: Partial<Settings>) => void;
   media: Media | null;
   mediaAt: number;
   cover: string | null;

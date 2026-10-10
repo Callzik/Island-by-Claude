@@ -225,6 +225,8 @@ const RATES_KEY = "island.rates.v1";
 let rates: Record<string, number> | null = null;
 let ratesAt = 0;
 let loading: Promise<void> | null = null;
+/** when the last attempt to load rates failed (no rates at all yet) */
+let failedAt = 0;
 
 try {
   const raw = localStorage.getItem(RATES_KEY);
@@ -267,30 +269,33 @@ async function fetchRates(): Promise<void> {
         } catch {
           /* ignore */
         }
+        failedAt = 0;
         return;
       }
     } catch {
       /* try next source */
     }
   }
+  failedAt = Date.now();
 }
 
 /** Starts loading exchange rates (cached for 6 hours). */
 export function ensureRates(): Promise<void> {
   if (rates && Date.now() - ratesAt < 6 * 3600e3) return Promise.resolve();
+  // offline: don't hammer the servers on every keystroke
+  if (!loading && failedAt && Date.now() - failedAt < 60e3) return Promise.resolve();
   if (!loading) loading = fetchRates().finally(() => (loading = null));
   return loading;
 }
 
-export function convertCurrency(q: string): Conversion | "pending" | null {
+export function convertCurrency(q: string): Conversion | "pending" | "failed" | null {
   for (const { num, from, to } of splits(q)) {
     const a = findCurrency(from);
     const b = findCurrency(to);
     if (!a || !b || a === b) continue;
-    if (!rates) {
-      ensureRates();
-      return "pending";
-    }
+    // old cached rates are still shown, fresh ones load in the background
+    ensureRates();
+    if (!rates) return failedAt && !loading ? "failed" : "pending";
     const ra = rates[a.code];
     const rb = rates[b.code];
     if (!ra || !rb) return null;

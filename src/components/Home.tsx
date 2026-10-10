@@ -83,26 +83,34 @@ interface OutputDevice {
 }
 
 /** "Динамики ⌄": switch the default output device. */
-function DeviceMenu({ volume, setBusy }: Pick<PanelProps, "volume" | "setBusy">) {
+// The list opens upwards inside the panel, so it doesn't need to hold the panel
+// open ("busy"): leaving the panel simply folds it, list included.
+function DeviceMenu({ volume }: Pick<PanelProps, "volume">) {
   const [open, setOpen] = useState(false);
   const [list, setList] = useState<OutputDevice[] | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("pointerdown", away, true);
+    return () => window.removeEventListener("pointerdown", away, true);
+  }, [open]);
   const toggle = async () => {
     if (open) {
       setOpen(false);
-      setBusy(false);
       return;
     }
     setOpen(true);
-    setBusy(true);
     setList(await call<OutputDevice[]>("audio_devices").catch(() => []));
   };
   const pick = async (d: OutputDevice) => {
     setOpen(false);
-    setBusy(false);
     if (!d.default) await call("audio_set_device", { id: d.id });
   };
   return (
-    <div className="device-menu">
+    <div className="device-menu" ref={root}>
       <button className={`device-chip ${open ? "open" : ""}`} title={volume.device} onClick={toggle}>
         <ISpeaker size={15} />
         <span className="device-name">{volume.device}</span>
@@ -124,7 +132,7 @@ function DeviceMenu({ volume, setBusy }: Pick<PanelProps, "volume" | "setBusy">)
   );
 }
 
-function VolumeRow({ volume, setBusy }: Pick<PanelProps, "volume" | "setBusy">) {
+function VolumeRow({ volume }: Pick<PanelProps, "volume">) {
   const [local, setLocal] = useState<number | null>(null);
   const last = useRef(0);
   const level = local ?? Math.round(volume.level * 100);
@@ -148,9 +156,10 @@ function VolumeRow({ volume, setBusy }: Pick<PanelProps, "volume" | "setBusy">) 
         max={100}
         value={level}
         style={{ ["--p" as string]: `${level}%` }}
-        onPointerDown={() => setBusy(true)}
+        // no "busy" here: while the button is held the panel stays open anyway
+        // (Rust reports the mouse button), and a release outside the window
+        // might never reach us and leave the panel stuck open
         onPointerUp={() => {
-          setBusy(false);
           if (local !== null) send(local, true);
           window.setTimeout(() => setLocal(null), 600);
         }}
@@ -161,7 +170,7 @@ function VolumeRow({ volume, setBusy }: Pick<PanelProps, "volume" | "setBusy">) 
         }}
       />
       <span className="volume-value">{level}</span>
-      {volume.device && <DeviceMenu volume={volume} setBusy={setBusy} />}
+      {volume.device && <DeviceMenu volume={volume} />}
     </div>
   );
 }
@@ -219,7 +228,7 @@ export function Home(p: PanelProps) {
     <div className="home">
       <div className="home-left">
         <MediaCard media={p.media} mediaAt={p.mediaAt} cover={p.cover} accent={p.accent} />
-        <VolumeRow volume={p.volume} setBusy={p.setBusy} />
+        <VolumeRow volume={p.volume} />
       </div>
       <div className="actions">
         <Action icon={IRegion} label="Область" onClick={() => capture("region")} />

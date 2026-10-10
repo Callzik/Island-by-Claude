@@ -2,7 +2,13 @@
 
 use serde::Serialize;
 
+use std::time::Duration;
+
 use crate::ai::client;
+
+/// A stalled request (Wi-Fi roaming, sleep, captive portal) must not hang the
+/// weather thread forever.
+const TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +32,7 @@ pub struct WeatherPayload {
 pub async fn search(q: &str) -> Result<Vec<Place>, String> {
     let resp = client()
         .get("https://geocoding-api.open-meteo.com/v1/search")
+        .timeout(TIMEOUT)
         .query(&[("name", q), ("count", "7"), ("language", "ru"), ("format", "json")])
         .send()
         .await
@@ -58,6 +65,7 @@ pub async fn search(q: &str) -> Result<Vec<Place>, String> {
 pub async fn locate() -> Result<Place, String> {
     let v: serde_json::Value = client()
         .get("https://ipwho.is/?lang=ru")
+        .timeout(TIMEOUT)
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -78,6 +86,7 @@ pub async fn locate() -> Result<Place, String> {
 pub async fn forecast(lat: f64, lon: f64) -> Result<serde_json::Value, String> {
     let resp = client()
         .get("https://api.open-meteo.com/v1/forecast")
+        .timeout(TIMEOUT)
         .query(&[
             ("latitude", format!("{lat:.4}")),
             ("longitude", format!("{lon:.4}")),

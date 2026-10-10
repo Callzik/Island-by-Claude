@@ -41,6 +41,16 @@ struct Track {
     at: Instant,
     speed: f64,
     first_seen: Instant,
+    /// last time the size changed
+    changed: Instant,
+}
+
+/// A temp file that hasn't grown for this long is an abandoned or paused
+/// download (last week's film.mkv.crdownload): not shown as "downloading".
+const STALL: Duration = Duration::from_secs(30);
+
+fn live(t: &Track, now: Instant) -> bool {
+    now.duration_since(t.changed) < STALL
 }
 
 pub struct Watcher {
@@ -59,21 +69,28 @@ impl Watcher {
     }
 
     pub fn active(&self) -> bool {
-        !self.tracks.is_empty()
+        let now = Instant::now();
+        self.tracks.values().any(|t| live(t, now))
     }
 
     /// Rescans the folder. Returns current progress (if anything is downloading)
     /// and downloads that finished since the last scan.
     pub fn scan(&mut self) -> (Option<Progress>, Vec<Finished>) {
         let now = Instant::now();
-        let mut seen: HashMap<PathBuf, u64> = HashMap::new();
+        // path → (size, not written to for a while)
+        let mut seen: HashMap<PathBuf, (u64, bool)> = HashMap::new();
+        let old = SystemTime::now() - Duration::from_secs(60);
         if let Ok(rd) = fs::read_dir(&self.dir) {
             for e in rd.flatten() {
                 let p = e.path();
                 if is_temp(&p) {
-                    if let Ok(m) = e.metadata() {
+                    // fs::metadata opens the file: the directory listing only gets
+                    // the new size once the browser closes it (NTFS), so a running
+                    // download would look frozen
+                    if let Ok(m) = fs::metadata(&p) {
                         if m.is_file() {
-                            seen.insert(p, m.len());
+                            let idle = m.modified().map(|t| t < old).unwrap_or(false);
+                            seen.insert(p, (m.len(), idle));
                         }
                     }
                 }
@@ -81,39 +98,44 @@ impl Watcher {
         }
 
         // gone temp files: the browser renamed them to the final name (or the user cancelled)
-        let gone: Vec<(PathBuf, u64)> = self
+        let gone: Vec<(PathBuf, u64, Duration)> = self
             .tracks
             .iter()
             .filter(|(p, _)| !seen.contains_key(*p))
-            .map(|(p, t)| (p.clone(), t.bytes))
+            .map(|(p, t)| (p.clone(), t.bytes, now.duration_since(t.first_seen)))
             .collect();
         let mut finished = Vec::new();
-        for (p, bytes) in gone {
+        for (p, bytes, age) in gone {
             self.tracks.remove(&p);
-            if let Some(f) = self.find_final(&p, bytes) {
+            if let Some(f) = self.find_final(&p, bytes, age) {
                 finished.push(f);
             }
         }
 
-        for (p, bytes) in &seen {
+        for (p, (bytes, idle)) in &seen {
             let t = self.tracks.entry(p.clone()).or_insert(Track {
                 bytes: *bytes,
                 at: now,
                 speed: 0.0,
                 first_seen: now,
+                // an old leftover starts out stalled
+                changed: if *idle { now.checked_sub(STALL).unwrap_or(now) } else { now },
             });
             let dt = now.duration_since(t.at).as_secs_f64();
             if dt >= 0.4 {
                 let inst = (bytes.saturating_sub(t.bytes)) as f64 / dt;
                 t.speed = if t.speed == 0.0 { inst } else { t.speed * 0.6 + inst * 0.4 };
+                if *bytes != t.bytes {
+                    t.changed = now;
+                }
                 t.bytes = *bytes;
                 t.at = now;
             }
         }
 
         // the most recent download is shown; a just-created empty one waits a moment
-        let shown = self
-            .tracks
+        let running: Vec<(&PathBuf, &Track)> = self.tracks.iter().filter(|(_, t)| live(t, now)).collect();
+        let shown = running
             .iter()
             .filter(|(_, t)| t.bytes > 0 || now.duration_since(t.first_seen) > Duration::from_millis(800))
             .max_by_key(|(_, t)| t.first_seen);
@@ -121,23 +143,28 @@ impl Watcher {
             name: final_name(p).unwrap_or_else(|| "Загрузка…".into()),
             bytes: t.bytes,
             speed: t.speed,
-            count: self.tracks.len(),
+            count: running.len(),
         });
         (progress, finished)
     }
 
-    /// The finished file: "<name without temp ext>" if it exists, otherwise the
-    /// newest regular file written in the last few seconds with a similar size.
-    fn find_final(&self, temp: &Path, last_bytes: u64) -> Option<Finished> {
+    /// The finished file: "<name without temp ext>" if it exists. When the temp
+    /// name didn't tell (Chrome's "Unconfirmed 123"), the newest regular file
+    /// written since that download started and of a similar size.
+    fn find_final(&self, temp: &Path, last_bytes: u64, age: Duration) -> Option<Finished> {
         if let Some(name) = final_name(temp) {
             let p = self.dir.join(&name);
-            if let Ok(m) = fs::metadata(&p) {
-                if m.is_file() {
-                    return Some(Finished { path: p, size: m.len() });
-                }
-            }
+            return match fs::metadata(&p) {
+                Ok(m) if m.is_file() => Some(Finished { path: p, size: m.len() }),
+                // the named file isn't there: the download was cancelled — don't
+                // announce some other file that happened to be saved meanwhile
+                _ => None,
+            };
         }
-        let recent = SystemTime::now() - Duration::from_secs(8);
+        if last_bytes == 0 {
+            return None;
+        }
+        let recent = SystemTime::now() - (age + Duration::from_secs(2)).min(Duration::from_secs(8));
         fs::read_dir(&self.dir)
             .ok()?
             .flatten()

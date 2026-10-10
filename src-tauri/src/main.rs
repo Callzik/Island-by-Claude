@@ -194,6 +194,9 @@ struct Shared {
     capturing: AtomicBool,
     /// Bumped to cancel the reply being streamed.
     ai_gen: AtomicU32,
+    /// The reply being streamed: aborted on Stop even while it waits for the
+    /// server (a model still loading may not send a byte for minutes).
+    ai_task: Mutex<Option<(String, tauri::async_runtime::JoinHandle<()>)>>,
     weather: Mutex<Option<weather::WeatherPayload>>,
     weather_wake: Mutex<Sender<()>>,
     voice_tx: Mutex<Sender<VoiceCmd>>,
@@ -300,9 +303,19 @@ fn place_window(win: &WebviewWindow, shared: &Shared, force: bool) {
         scale,
     };
     let changed = *lock(&shared.geom) != geom;
-    if force || changed {
-        let _ = win.set_size(PhysicalSize::new(w as u32, h as u32));
+    // also put it back when something else moved it (a monitor dropping out on
+    // wake, Win+Shift+arrows while the launcher has focus)
+    let misplaced = match (win.outer_position(), win.outer_size()) {
+        (Ok(p), Ok(sz)) => {
+            (p.x - geom.x).abs() > 2 || (p.y - geom.y).abs() > 2 || (sz.width as i32 - w).abs() > 2 || (sz.height as i32 - h).abs() > 2
+        }
+        _ => false,
+    };
+    if force || changed || misplaced {
+        // position first: moving onto a monitor with another DPI rescales the
+        // window, the size set afterwards is then the right one for that monitor
         let _ = win.set_position(PhysicalPosition::new(geom.x, geom.y));
+        let _ = win.set_size(PhysicalSize::new(w as u32, h as u32));
         *lock(&shared.geom) = geom;
     }
 }
@@ -475,7 +488,9 @@ fn spawn_cursor_thread(app: AppHandle, shared: Arc<Shared>) {
                 if tick % 15 == 0 {
                     let own = shared.own_hwnd.load(Ordering::Relaxed);
                     let fg = input::foreground();
-                    if fg != 0 && fg != own {
+                    // remember the user's window, never one of ours (the capture
+                    // overlay or the tray menu would get the focus back instead)
+                    if fg != 0 && fg != own && !input::is_own_process(fg) {
                         shared.last_fg.store(fg, Ordering::Relaxed);
                     }
                     let hide = lock(&shared.settings).hide_fullscreen && input::foreground_is_fullscreen(own);
@@ -513,6 +528,11 @@ fn spawn_media_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<MediaCmd
                 match rx.recv_timeout(Duration::from_millis(700)) {
                     Ok(cmd) => {
                         let _ = media.control(&cmd.action, cmd.value);
+                        // quick clicks (next, next, next) go out together, then
+                        // one pause lets the player update its state
+                        while let Ok(more) = rx.try_recv() {
+                            let _ = media.control(&more.action, more.value);
+                        }
                         thread::sleep(Duration::from_millis(250));
                     }
                     Err(RecvTimeoutError::Timeout) => {}
@@ -669,13 +689,23 @@ fn spawn_clip_thread(app: AppHandle, shared: Arc<Shared>) {
                     .unwrap_or_default();
                 let Some(data) = clip::read() else { continue };
                 let limit = lock(&shared.settings).clip_limit;
-                let views = {
-                    let mut store = lock(&shared.clips);
-                    if !store.add(data, source, limit) {
-                        continue;
+                let added = match data {
+                    // hashing and PNG encoding happen outside the history lock
+                    clip::ClipData::Image { width, height, rgba } => {
+                        let hash = clips::image_hash(&rgba);
+                        let known = lock(&shared.clips).bump_image(hash, width, height, &source);
+                        known
+                            || match clips::encode_image(&shared.paths.clip_dir(), width, height, &rgba, hash) {
+                                Some(img) => lock(&shared.clips).add_image(img, source, limit),
+                                None => false,
+                            }
                     }
-                    store.views()
+                    other => lock(&shared.clips).add(other, source, limit),
                 };
+                if !added {
+                    continue;
+                }
+                let views = lock(&shared.clips).views();
                 let _ = app.emit("clips", views);
             }
         })
@@ -886,15 +916,19 @@ fn spawn_downloads_thread(app: AppHandle, shared: Arc<Shared>) {
             }
             let mut w = downloads::Watcher::new(dir);
             let mut last: Option<downloads::Progress> = None;
+            let mut last_scan = Instant::now();
             loop {
                 let wait = if w.active() { Duration::from_millis(700) } else { Duration::from_secs(30) };
                 match rx.recv_timeout(wait) {
                     Ok(()) | Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => break,
                 }
-                // a burst of fs events → one scan
-                thread::sleep(Duration::from_millis(120));
+                // a burst of fs events → one scan; a browser writing a file fires
+                // events non-stop, so scans are also spaced out
+                let pause = Duration::from_millis(600).saturating_sub(last_scan.elapsed()).max(Duration::from_millis(120));
+                thread::sleep(pause);
                 while rx.try_recv().is_ok() {}
+                last_scan = Instant::now();
                 if !lock(&shared.settings).downloads_enabled {
                     if last.take().is_some() {
                         let _ = app.emit("download", None::<downloads::Progress>);
@@ -1008,13 +1042,19 @@ fn save_settings(app: AppHandle, state: St<'_>, settings: Settings) -> Result<Se
         next.hotkey_voice = old.hotkey_voice.clone();
     }
     let failed_before = lock(&state.hotkey_error).is_some();
-    if hotkey_bindings(&next) != hotkey_bindings(&old) || failed_before {
+    let keys_changed = hotkey_bindings(&next) != hotkey_bindings(&old);
+    if keys_changed || failed_before {
         let errors = apply_hotkeys(&app, &state, &next);
-        if !errors.is_empty() {
+        if errors.is_empty() {
+            *lock(&state.hotkey_error) = None;
+        } else if keys_changed {
             let _ = apply_hotkeys(&app, &state, &old);
             return Err(format!("Не удалось назначить {}", errors.join(", ")));
+        } else {
+            // the same combos still clash with another app (e.g. PowerToys owns
+            // Alt+Space): that must not block saving the city or a toggle
+            *lock(&state.hotkey_error) = Some(errors.join(", "));
         }
-        *lock(&state.hotkey_error) = None;
     }
     if next.autostart != old.autostart {
         apply_autostart(&app, next.autostart);
@@ -1031,7 +1071,7 @@ fn save_settings(app: AppHandle, state: St<'_>, settings: Settings) -> Result<Se
         || next.weather_city != old.weather_city
         || next.weather_lat != old.weather_lat
         || next.weather_lon != old.weather_lon;
-    save_json(&state.paths.settings(), &next);
+    store::save_json_synced(&state.paths.settings(), &next);
     *lock(&state.settings) = next.clone();
     if weather_changed {
         let _ = lock(&state.weather_wake).send(());
@@ -1416,8 +1456,20 @@ fn lock_screen() -> bool {
     input::lock_workstation()
 }
 
+/// An MP4 that was never finished has no index and won't play: close a running
+/// recording properly before the process goes away.
+fn finish_recording_before_exit(app: &AppHandle) {
+    if let Some(shared) = app.try_state::<Arc<Shared>>() {
+        let rec = lock(&shared.recording).take();
+        if let Some(rec) = rec {
+            let _ = rec.finish();
+        }
+    }
+}
+
 #[tauri::command]
 fn quit(app: AppHandle) {
+    finish_recording_before_exit(&app);
     app.exit(0);
 }
 
@@ -1467,7 +1519,9 @@ fn snapshot(shared: &Shared, mode: &str) -> Option<Shot> {
     capture::exclude_from_capture(own, true);
     thread::sleep(Duration::from_millis(60));
     let px = capture::grab(x, y, w, h);
-    capture::exclude_from_capture(own, false);
+    // a recording in progress keeps the island (red dot, timer) out of the video
+    let recording = lock(&shared.recording).is_some();
+    capture::exclude_from_capture(own, recording);
     let bgra = Arc::new(px?);
     let bmp = Arc::new(capture::bmp(&bgra, w, h));
     Some(Shot {
@@ -1547,8 +1601,7 @@ fn finish_image(app: &AppHandle, shared: &Shared, bgra: &[u8], w: u32, h: u32) {
     if copied {
         shared.clip_skip_seq.store(clip::sequence(), Ordering::Relaxed);
     }
-    let name = format!("Island-{}.png", capture::local_stamp());
-    let path = capture::screenshots_dir().map(|d| d.join(&name));
+    let path = capture::screenshots_dir().map(|d| capture::unique_file(&d, "png"));
     let saved = path.as_ref().map(|p| fs::write(p, &png).is_ok()).unwrap_or(false);
     let (tw, th, thumb) = img::shrink(w, h, &rgba, 120);
     let image = img::encode_png(tw, th, &thumb).map(|b| util::data_url("image/png", &b));
@@ -1649,13 +1702,14 @@ fn recording_state(app: &AppHandle, active: bool, started_ms: i64) {
 /// Starts an MP4 recording of the snapshot's monitor (or a part of it).
 fn start_recording(app: &AppHandle, shared: &Arc<Shared>, shot: &Shot, rect: Option<(u32, u32, u32, u32)>) {
     if lock(&shared.recording).is_some() {
+        toast_error(app, "Запись уже идёт", "Остановите её кликом по острову");
         return;
     }
     let Some(dir) = capture::videos_dir() else {
         toast_error(app, "Нет папки «Видео»", "");
         return;
     };
-    let path = dir.join(format!("Island-{}.mp4", capture::local_stamp()));
+    let path = capture::unique_file(&dir, "mp4");
     let hmon = capture::monitor_handle_at(shot.x + shot.w as i32 / 2, shot.y + shot.h as i32 / 2);
     // the island (red dot and timer) stays out of the video
     capture::exclude_from_capture(shared.own_hwnd.load(Ordering::Relaxed), true);
@@ -1820,7 +1874,12 @@ fn ai_send(app: AppHandle, state: St<'_>, id: String, messages: serde_json::Valu
         let s = lock(&shared.settings);
         (s.ai_url.clone(), s.ai_key.clone(), s.ai_model.clone())
     };
-    tauri::async_runtime::spawn(async move {
+    let task_id = id.clone();
+    let task_app = app.clone();
+    let task_shared = shared.clone();
+    let handle = tauri::async_runtime::spawn(async move {
+        let app = task_app;
+        let shared = task_shared;
         let done = |error: Option<String>| {
             let _ = app.emit("ai-done", AiDone { id: id.clone(), error });
         };
@@ -1845,7 +1904,9 @@ fn ai_send(app: AppHandle, state: St<'_>, id: String, messages: serde_json::Valu
                 .unwrap_or_else(|| text.chars().take(200).collect());
             return done(Some(format!("Сервер ответил {status}: {msg}")));
         }
-        let mut buf = String::new();
+        // bytes, not text: a network chunk can end in the middle of a Cyrillic
+        // letter, and decoding each chunk on its own would turn it into "��"
+        let mut buf: Vec<u8> = Vec::new();
         loop {
             if shared.ai_gen.load(Ordering::Relaxed) != gen {
                 return done(None);
@@ -1855,9 +1916,10 @@ fn ai_send(app: AppHandle, state: St<'_>, id: String, messages: serde_json::Valu
                 Ok(None) => break,
                 Err(e) => return done(Some(ai::explain(&e, &base))),
             };
-            buf.push_str(&String::from_utf8_lossy(&chunk));
-            while let Some(nl) = buf.find('\n') {
-                let line: String = buf.drain(..=nl).collect();
+            buf.extend_from_slice(&chunk);
+            while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+                let raw: Vec<u8> = buf.drain(..=nl).collect();
+                let line = String::from_utf8_lossy(&raw);
                 match ai::parse_sse_line(&line) {
                     ai::Sse::Delta(d) => {
                         let _ = app.emit("ai-chunk", AiChunk { id: id.clone(), delta: d });
@@ -1867,16 +1929,41 @@ fn ai_send(app: AppHandle, state: St<'_>, id: String, messages: serde_json::Valu
                 }
             }
         }
-        if let ai::Sse::Delta(d) = ai::parse_sse_line(&buf) {
+        if let ai::Sse::Delta(d) = ai::parse_sse_line(&String::from_utf8_lossy(&buf)) {
             let _ = app.emit("ai-chunk", AiChunk { id: id.clone(), delta: d });
         }
         done(None)
     });
+    // a new question replaces a reply still in flight
+    let prev = lock(&shared.ai_task).replace((task_id, handle));
+    if let Some((prev_id, h)) = prev {
+        h.abort();
+        let _ = app.emit("ai-done", AiDone { id: prev_id, error: None });
+    }
 }
 
 #[tauri::command]
-fn ai_stop(state: St<'_>) {
-    state.ai_gen.fetch_add(1, Ordering::Relaxed);
+/// `id` = the reply to stop; a Stop that arrives after the next question was
+/// already sent must not cancel that new reply.
+fn ai_stop(app: AppHandle, state: St<'_>, id: Option<String>) {
+    let task = {
+        let mut slot = lock(&state.ai_task);
+        let matches = match (&id, slot.as_ref()) {
+            (Some(want), Some((cur, _))) => want == cur,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        if matches {
+            slot.take()
+        } else {
+            None
+        }
+    };
+    if let Some((id, h)) = task {
+        state.ai_gen.fetch_add(1, Ordering::Relaxed);
+        h.abort();
+        let _ = app.emit("ai-done", AiDone { id, error: None });
+    }
 }
 
 #[tauri::command]
@@ -1950,9 +2037,21 @@ fn chat_load(state: St<'_>) -> serde_json::Value {
     }
 }
 
+/// Saved off the main thread (a dialogue with pictures is megabytes of JSON and
+/// a sync command would freeze every window meanwhile). Only the newest
+/// version is written when saves pile up.
 #[tauri::command]
 fn chat_save(state: St<'_>, messages: serde_json::Value) {
-    save_json(&state.paths.chat(), &messages);
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    static WRITING: Mutex<()> = Mutex::new(());
+    let path = state.paths.chat();
+    let me = SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    thread::spawn(move || {
+        let _guard = lock(&WRITING);
+        if SEQ.load(Ordering::SeqCst) == me {
+            save_json(&path, &messages);
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1979,8 +2078,14 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "settings" => {
                 let _ = app.emit("open-panel", "settings");
             }
-            "restart" => app.restart(),
-            "quit" => app.exit(0),
+            "restart" => {
+                finish_recording_before_exit(app);
+                app.restart()
+            }
+            "quit" => {
+                finish_recording_before_exit(app);
+                app.exit(0)
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -2063,6 +2168,7 @@ fn main() {
                 shot_seq: AtomicU32::new(0),
                 capturing: AtomicBool::new(false),
                 ai_gen: AtomicU32::new(0),
+                ai_task: Mutex::new(None),
                 weather: Mutex::new(None),
                 weather_wake: Mutex::new(weather_tx),
                 voice_tx: Mutex::new(voice_tx),

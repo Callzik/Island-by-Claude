@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,19 +23,54 @@ pub fn new_id() -> String {
 }
 
 pub fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
-    fs::read(path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+    let parse = |p: &Path| fs::read(p).ok().and_then(|b| serde_json::from_slice::<T>(&b).ok());
+    if let Some(v) = parse(path) {
+        return v;
+    }
+    // Missing or damaged (power cut while saving): set the broken file aside —
+    // otherwise the next save would rotate it over the good backup — and fall
+    // back to the previous good copy.
+    if path.exists() {
+        let _ = fs::rename(path, path.with_extension("corrupt"));
+    }
+    parse(&path.with_extension("bak")).unwrap_or_default()
 }
 
-/// Writes atomically (tmp file + rename) so a crash never leaves half a file.
+/// Writes the new file next to the old one, then swaps it in; the previous
+/// version stays as *.bak, which `load_json` falls back to if a crash or power
+/// cut leaves the new file damaged.
 pub fn save_json<T: Serialize>(path: &Path, value: &T) {
-    if let Ok(bytes) = serde_json::to_vec_pretty(value) {
-        let tmp = path.with_extension("tmp");
-        if fs::write(&tmp, bytes).is_ok() {
-            let _ = fs::rename(&tmp, path);
+    write_json(path, value, false);
+}
+
+/// Same, and waits until the data is physically on disk. Only for rare,
+/// important saves (settings) — a flush can take long on a busy HDD.
+pub fn save_json_synced<T: Serialize>(path: &Path, value: &T) {
+    write_json(path, value, true);
+}
+
+fn write_json<T: Serialize>(path: &Path, value: &T, sync: bool) {
+    let Ok(bytes) = serde_json::to_vec_pretty(value) else { return };
+    let tmp = path.with_extension("tmp");
+    let written = (|| -> std::io::Result<()> {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(&bytes)?;
+        if sync {
+            f.sync_all()?;
         }
+        Ok(())
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
+        return;
+    }
+    let _ = fs::rename(path, path.with_extension("bak"));
+    // antivirus / backup tools sometimes hold the file for a moment
+    for attempt in 0..3 {
+        if fs::rename(&tmp, path).is_ok() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1)));
     }
 }
 

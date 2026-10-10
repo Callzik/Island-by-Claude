@@ -1,7 +1,15 @@
 // Tiny markdown for chat replies: paragraphs, headings, lists, quotes,
 // fenced code, **bold**, *italic*, `code`, [links](url). No HTML is injected.
 
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import { call, isTauri } from "../api";
+
+/** Links open in the default browser, not inside the island's webview. */
+function openLink(e: MouseEvent<HTMLAnchorElement>) {
+  if (!isTauri) return;
+  e.preventDefault();
+  call("open_target", { target: e.currentTarget.href, count: false }).catch(() => {});
+}
 
 function inline(text: string, key = 0): ReactNode[] {
   const out: ReactNode[] = [];
@@ -17,7 +25,7 @@ function inline(text: string, key = 0): ReactNode[] {
     else if (m[2]) {
       const label = m[2].slice(1, m[2].indexOf("]"));
       out.push(
-        <a key={k} href={m[3]} target="_blank" rel="noreferrer">
+        <a key={k} href={m[3]} rel="noreferrer" onClick={openLink}>
           {label}
         </a>,
       );

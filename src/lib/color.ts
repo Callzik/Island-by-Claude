@@ -67,6 +67,8 @@ export function accentFrom(url: string): Promise<RGB> {
         const [h, s, l] = rgbToHsl(best.r / best.w, best.g / best.w, best.b / best.w);
         const rgb = hslToRgb(h, Math.max(0.55, Math.min(0.9, s * 1.15)), Math.max(0.55, Math.min(0.68, l)));
         cache.set(url, rgb);
+        // keys are whole cover data: URLs (tens of KB each) — keep only recent ones
+        if (cache.size > 24) cache.delete(cache.keys().next().value!);
         resolve(rgb);
       } catch {
         resolve(DEFAULT_ACCENT);

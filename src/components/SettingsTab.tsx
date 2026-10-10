@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { call, type Settings } from "../api";
 import { IKeyboard, IPower } from "./Icons";
 import { RESIDENTS, ResidentSvg } from "../lib/residents";
@@ -99,6 +99,16 @@ function TextField({
   const commit = () => {
     if (v !== value) onSave(v.trim());
   };
+  // Esc or leaving the panel unmounts the field without a blur: keep the edit
+  const latest = useRef({ v, value, onSave });
+  latest.current = { v, value, onSave };
+  useEffect(
+    () => () => {
+      const l = latest.current;
+      if (l.v !== l.value) l.onSave(l.v.trim());
+    },
+    [],
+  );
   return (
     <input
       className="field"
@@ -168,7 +178,7 @@ interface Place {
   lon: number;
 }
 
-function CityPicker({ settings, save, setBusy }: { settings: Settings; save: (s: Settings) => void; setBusy: (b: boolean) => void }) {
+function CityPicker({ settings, save, setBusy }: { settings: Settings; save: (patch: Partial<Settings>) => void; setBusy: (b: boolean) => void }) {
   const [q, setQ] = useState("");
   const [found, setFound] = useState<Place[] | null>(null);
   const [busy, setLocal] = useState(false);
@@ -183,7 +193,7 @@ function CityPicker({ settings, save, setBusy }: { settings: Settings; save: (s:
     return () => window.clearTimeout(t);
   }, [q]);
   const choose = (p: Place) => {
-    save({ ...settings, weatherCity: p.name, weatherLat: p.lat, weatherLon: p.lon });
+    save({ weatherCity: p.name, weatherLat: p.lat, weatherLon: p.lon });
     setQ("");
     setFound(null);
   };
@@ -213,7 +223,7 @@ function CityPicker({ settings, save, setBusy }: { settings: Settings; save: (s:
               const p = await call<Place>("weather_locate");
               choose(p);
             } catch {
-              save({ ...settings, weatherCity: "", weatherLat: 0, weatherLon: 0 });
+              save({ weatherCity: "", weatherLat: 0, weatherLon: 0 });
             } finally {
               setLocal(false);
             }
@@ -243,11 +253,11 @@ export function SettingsTab({
   setBusy,
 }: {
   settings: Settings;
-  save: (s: Settings) => void;
+  save: (patch: Partial<Settings>) => void;
   version: string;
   setBusy: (b: boolean) => void;
 }) {
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => save({ ...settings, [k]: v });
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => save({ [k]: v } as Partial<Settings>);
   const [confirm, setConfirm] = useState(false);
 
   const rows: { key: keyof Settings; title: string; sub: string }[] = [

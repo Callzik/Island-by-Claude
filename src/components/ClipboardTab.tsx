@@ -37,8 +37,9 @@ export function ClipboardTab({ clips, onClose, toast }: { clips: Clip[]; onClose
     call("clip_paste", { id: c.id, paste: true });
   };
   const copy = (c: Clip) => {
-    call("clip_paste", { id: c.id, paste: false });
-    toast({ icon: "copy", title: "Скопировано", subtitle: c.preview.slice(0, 60) });
+    call<boolean>("clip_paste", { id: c.id, paste: false }).then((ok) =>
+      toast(ok ? { icon: "copy", title: "Скопировано", subtitle: c.preview.slice(0, 60) } : { icon: "error", tone: "error", title: "Не удалось скопировать" }),
+    );
   };
 
   const onKey = (e: KeyboardEvent) => {

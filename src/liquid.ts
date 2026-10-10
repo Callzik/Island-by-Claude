@@ -48,6 +48,12 @@ interface Drop {
 }
 
 const K = 0.5523; // bezier circle constant
+/** Frame budget: on 120 Hz+ monitors draw every 2nd/3rd refresh (~60–80 fps).
+ *  While music plays the island animates non-stop, so this halves its GPU cost.
+ *  Slower displays (60–100 Hz) draw every frame. */
+const MIN_FRAME_MS = 12;
+/** refresh interval below which frames are skipped (≈ 110 Hz) */
+const FAST_REFRESH_MS = 9;
 const REACH = 150; // how far below the island the cursor still pulls
 
 export class Liquid {
@@ -69,6 +75,7 @@ export class Liquid {
   private rim: [number, number, number, number] = [255, 255, 255, 0.12];
   private rimTarget: [number, number, number, number] = [255, 255, 255, 0.12];
   private shadow = new Spring(0, 80, 18);
+  private springs = [this.w, this.h, this.r, this.pull, this.pullX, this.wave, this.bars, this.shadow];
 
   private level = 0;
   private levelTarget = 0;
@@ -153,20 +160,38 @@ export class Liquid {
     this.kick();
   }
 
+  /** false until the first frame after a pause — that one is never skipped */
+  private drawn = false;
+  private prevTick = 0;
+  private refreshMs = 1000 / 60;
+
   kick() {
     if (this.raf || this.destroyed) return;
     this.last = performance.now();
+    this.drawn = false;
+    this.prevTick = 0;
     this.raf = requestAnimationFrame(this.tick);
   }
 
   private tick = (now: number) => {
     this.raf = 0;
+    // measured refresh interval (only between two consecutive callbacks)
+    if (this.prevTick) {
+      const d = now - this.prevTick;
+      if (d > 0 && d < 50) this.refreshMs += (d - this.refreshMs) * 0.1;
+    }
+    this.prevTick = now;
+    if (this.drawn && this.refreshMs < FAST_REFRESH_MS && now - this.last < MIN_FRAME_MS) {
+      this.raf = requestAnimationFrame(this.tick);
+      return;
+    }
+    this.drawn = true;
     const dt = Math.min(1 / 30, Math.max(0.001, (now - this.last) / 1000));
     this.last = now;
     this.t += dt;
 
     this.updatePull(now);
-    for (const s of [this.w, this.h, this.r, this.pull, this.pullX, this.wave, this.bars, this.shadow]) s.step(dt);
+    for (const s of this.springs) s.step(dt);
     if (this.w.value < 0) this.w.value = 0;
     if (this.h.value < 0) this.h.value = 0;
 

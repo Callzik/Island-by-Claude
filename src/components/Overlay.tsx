@@ -145,10 +145,20 @@ export function Overlay() {
     else console.info("capture_finish", s.mode, rect, col);
   };
 
+  const colorAt = (x: number, y: number): string | null => {
+    const src = srcRef.current;
+    if (!src) return null;
+    const sx = Math.min(src.width - 1, Math.max(0, Math.floor((x * src.width) / window.innerWidth)));
+    const sy = Math.min(src.height - 1, Math.max(0, Math.floor((y * src.height) / window.innerHeight)));
+    const px = src.getContext("2d")!.getImageData(sx, sy, 1, 1).data;
+    return `#${hex2(px[0])}${hex2(px[1])}${hex2(px[2])}`.toUpperCase();
+  };
+
   const down = (e: RMouseEvent) => {
     if (e.button === 2) return cancel();
     if (e.button !== 0) return;
-    if (start.mode === "picker") return finish(null, color);
+    // sample right under the click: no mousemove may have happened yet
+    if (start.mode === "picker") return finish(null, colorAt(e.clientX, e.clientY) ?? color);
     setDrag({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY });
   };
   const move = (e: RMouseEvent) => {

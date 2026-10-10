@@ -53,9 +53,11 @@ function firstArtist(s: string): string {
   return s.split(/\s*(?:,|;|&|\/|\bfeat\.?|\bft\.?)\s*/i)[0].trim();
 }
 
+/** null = "not there" (404); throws on network errors and other HTTP failures. */
 async function getJson(url: string, signal: AbortSignal): Promise<unknown> {
   const r = await fetch(url, { signal });
-  if (!r.ok) return null;
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
@@ -123,19 +125,24 @@ function useful(it: Item | null | undefined): it is Item {
   return !!it && !!(it.syncedLyrics || it.plainLyrics || it.instrumental);
 }
 
-/** Resolves with the first non-null result, or null when every task gives null. */
-function firstValid<T>(tasks: Promise<T | null>[]): Promise<T | null> {
+/** Resolves as soon as a task gives synced lyrics; otherwise waits for all of
+ *  them and takes the first plain-text / instrumental result. */
+function bestOf(tasks: Promise<Item | null>[]): Promise<Item | null> {
   return new Promise((resolve) => {
     let left = tasks.length;
+    let fallback: Item | null = null;
     if (!left) return resolve(null);
     for (const t of tasks) {
       t.then((v) => {
-        if (v) resolve(v);
-        else if (--left === 0) resolve(null);
+        if (v?.syncedLyrics) return resolve(v);
+        if (v && !fallback) fallback = v;
+        if (--left === 0) resolve(fallback);
       });
     }
   });
 }
+
+const CACHE_MAX = 120;
 
 /** null = nothing found. Throws when the request was aborted. */
 export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<LyricsData | null> {
@@ -161,10 +168,24 @@ export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<
   tasks.push(search(new URLSearchParams({ track_name: title, artist_name: artist })));
   tasks.push(search(new URLSearchParams({ q: `${artist} ${title}` })));
 
-  const found = await firstValid(tasks.map((t) => t.catch(() => null)));
-  if (signal.aborted) throw new DOMException("aborted", "AbortError");
+  // a failed request (offline at startup, 429/5xx) must not be remembered as
+  // "this song has no lyrics" — only a clean "not found" is
+  let failed = false;
+  const found = await bestOf(
+    tasks.map((t) =>
+      t.catch(() => {
+        failed = true;
+        return null;
+      }),
+    ),
+  );
+  // timed out waiting for a synced version: plain text found so far still counts
+  if (signal.aborted && !found) throw new DOMException("aborted", "AbortError");
 
   const data = found ? toData(found) : null;
-  cache.set(key, data);
+  if (data || !failed) {
+    cache.set(key, data);
+    if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
+  }
   return data;
 }

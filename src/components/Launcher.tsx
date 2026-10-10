@@ -69,7 +69,7 @@ export function Launcher({
 }) {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
-  const [, setRatesTick] = useState(0);
+  const [ratesTick, setRatesTick] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -84,14 +84,17 @@ export function Launcher({
   }, []);
 
   const launch = (target: string) => {
-    call("open_target", { target });
+    call<boolean>("open_target", { target })
+      .then((ok) => ok === false && toast({ icon: "error", tone: "error", title: "Не открылось", subtitle: target.replace(/^app:/, "") }))
+      .catch((e) => toast({ icon: "error", tone: "error", title: "Не открылось", subtitle: String(e) }));
     onLaunch(target);
     onClose(false);
   };
 
   const copy = (text: string, label: string) => {
-    call("copy_text", { text });
-    toast({ icon: "copy", title: "Скопировано", subtitle: label });
+    call("copy_text", { text })
+      .then(() => toast({ icon: "copy", title: "Скопировано", subtitle: label }))
+      .catch((e) => toast({ icon: "error", tone: "error", title: "Не скопировалось", subtitle: String(e) }));
     onClose(true);
   };
 
@@ -120,26 +123,30 @@ export function Launcher({
     else {
       const cur = convertCurrency(query);
       if (cur === "pending") out.push({ id: "cur", glyph: <ISwap size={19} />, title: "Загружаю курсы валют…", hint: "", run: () => {} });
+      else if (cur === "failed") out.push({ id: "cur", glyph: <ISwap size={19} />, title: "Курсы валют не загрузились", hint: "Нет интернета?", run: () => {} });
       else if (cur) out.push({ id: "cur", glyph: <ISwap size={19} />, title: cur.text, hint: "Курс валют · Enter — скопировать", run: () => copy(cur.copy, cur.text) });
     }
 
-    for (const c of COMMANDS) {
-      const s = Math.max(score(c.title, query), ...c.words.map((w) => score(w, query)));
-      if (s >= 300)
-        out.push({
-          id: c.id,
-          glyph: c.glyph,
-          title: c.title,
-          hint: "Команда",
-          run: () => {
-            onClose(false);
-            window.setTimeout(() => call(c.cmd), 150);
-          },
-        });
-    }
-
-    type Cand = { target: string; name: string; hint: string; s: number };
+    type Cand = { target: string; name: string; hint: string; s: number; glyph?: ReactNode; run?: () => void };
     const cands: Cand[] = [];
+    // commands compete with apps by score and need a few letters, so a single
+    // "l" + Enter never locks the PC
+    if (query.length >= 3)
+      for (const c of COMMANDS) {
+        const s = Math.max(score(c.title, query), ...c.words.map((w) => score(w, query)));
+        if (s >= 300)
+          cands.push({
+            target: c.id,
+            name: c.title,
+            hint: "Команда",
+            s: s - 50,
+            glyph: c.glyph,
+            run: () => {
+              onClose(false);
+              window.setTimeout(() => call(c.cmd).catch(() => {}), 150);
+            },
+          });
+      }
     for (const p of pins) {
       const s = score(p.name, query);
       if (s >= 0) cands.push({ target: p.target, name: p.name, hint: "Ярлык", s: s + 60 });
@@ -154,7 +161,12 @@ export function Launcher({
       if (s >= 0) cands.push({ target: f.path, name: f.name, hint: "С полки", s: s - 40 });
     }
     cands.sort((a, b) => b.s - a.s);
-    for (const c of cands.slice(0, 5)) out.push({ id: c.target, target: c.target, title: c.name, hint: c.hint, run: () => launch(c.target) });
+    for (const c of cands.slice(0, 5))
+      out.push(
+        c.run
+          ? { id: c.target, glyph: c.glyph, title: c.name, hint: c.hint, run: c.run }
+          : { id: c.target, target: c.target, title: c.name, hint: c.hint, run: () => launch(c.target) },
+      );
 
     if (looksLikeUrl(query)) {
       const url = /^https?:\/\//i.test(query) ? query : "https://" + query;
@@ -179,7 +191,7 @@ export function Launcher({
     });
     return out.slice(0, MAX_ROWS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, apps, pins, shelf, usage, ai]);
+  }, [q, apps, pins, shelf, usage, ai, ratesTick]);
 
   // exchange rates arrive asynchronously
   useEffect(() => {

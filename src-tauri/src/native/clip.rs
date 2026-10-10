@@ -94,27 +94,32 @@ pub fn read() -> Option<ClipData> {
     if !(has_files || has_text || has_dib) {
         return None;
     }
-    let _guard = Opened::open()?;
-    unsafe {
-        if has_files {
-            if let Some(files) = read_files() {
-                return Some(ClipData::Files(files));
-            }
-        }
-        if has_text {
-            if let Some(t) = read_text() {
-                if !t.trim().is_empty() {
-                    return Some(ClipData::Text(t));
+    // Only copy the bytes while the clipboard is open: other apps can't use it
+    // meanwhile, and converting a 4K image takes a while.
+    let dib = {
+        let _guard = Opened::open()?;
+        unsafe {
+            if has_files {
+                if let Some(files) = read_files() {
+                    return Some(ClipData::Files(files));
                 }
             }
-        }
-        if has_dib {
-            if let Some((width, height, rgba)) = read_dib() {
-                return Some(ClipData::Image { width, height, rgba });
+            if has_text {
+                if let Some(t) = read_text() {
+                    if !t.trim().is_empty() {
+                        return Some(ClipData::Text(t));
+                    }
+                }
+            }
+            if has_dib {
+                read_dib_bytes()
+            } else {
+                None
             }
         }
-    }
-    None
+    };
+    let (width, height, rgba) = parse_dib(&dib?)?;
+    Some(ClipData::Image { width, height, rgba })
 }
 
 unsafe fn read_text() -> Option<String> {
@@ -150,7 +155,7 @@ unsafe fn read_files() -> Option<Vec<String>> {
     }
 }
 
-unsafe fn read_dib() -> Option<(u32, u32, Vec<u8>)> {
+unsafe fn read_dib_bytes() -> Option<Vec<u8>> {
     let h = GetClipboardData(CF_DIB.0 as u32).ok()?;
     let g = HGLOBAL(h.0);
     let p = GlobalLock(g) as *const u8;
@@ -158,10 +163,9 @@ unsafe fn read_dib() -> Option<(u32, u32, Vec<u8>)> {
         return None;
     }
     let total = GlobalSize(g);
-    let bytes = std::slice::from_raw_parts(p, total);
-    let r = parse_dib(bytes);
+    let bytes = std::slice::from_raw_parts(p, total).to_vec();
     let _ = GlobalUnlock(g);
-    r
+    Some(bytes)
 }
 
 fn rd_u32(b: &[u8], o: usize) -> u32 {

@@ -70,13 +70,24 @@ export function Residents({
     let raf = 0;
     let last = performance.now();
     let lastFace = 0;
+    // hidden (panel open, fullscreen app): finish the fade-out, then stop
+    const stopAt = visible ? Infinity : last + 450;
+    // frame budget: smooth while hopping to music or reacting, much lower when
+    // they only breathe — this loop runs all day, so idle cost matters
+    let interval = 1000 / 30;
     const centers: { x: number; y: number; flip: boolean }[] = [];
     const anims: { anim: Anim; frame: number }[] = [];
 
     const tick = (now: number) => {
+      if (now > stopAt) {
+        raf = 0;
+        return;
+      }
       raf = requestAnimationFrame(tick);
-      const dt = Math.min(0.05, (now - last) / 1000);
+      if (now - last < interval - 3) return;
+      const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
+      let busy = false;
       const t = now / 1000;
       const box = boxRef.current;
       const W = window.innerWidth;
@@ -126,6 +137,7 @@ export function Residents({
           mood.calmUntil = now + 3500;
         }
         const anim: Anim = sleeping ? "idle" : now < mood.reactUntil ? "react" : moving ? "walk" : "idle";
+        if (anim !== "idle") busy = true;
         const fr = FRAMES[anim];
         const frame =
           sleeping ? 0 : anim === "react" ? Math.min(fr.n - 1, Math.floor(((now - mood.reactStart) / 1000) * fr.fps)) : Math.floor(t * fr.fps + i * 1.7) % fr.n;
@@ -140,6 +152,8 @@ export function Residents({
         el.style.transform = `translate(${x}px, ${y + hop}px) rotate(${tilt}deg) scale(${(flip ? -1 : 1) / Math.sqrt(stretch)}, ${breathe * stretch})`;
         centers[i] = { x: x + SIZE / 2, y: y + SIZE / 2, flip };
       });
+
+      interval = amp > 0.02 ? 1000 / 60 : busy ? 1000 / 30 : 1000 / 15;
 
       // faces (eye direction) a few times a second
       if (now - lastFace > 60) {
@@ -168,7 +182,7 @@ export function Residents({
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ids.join(",")]);
+  }, [ids.join(","), visible]);
 
   if (!list.length) return null;
   return (

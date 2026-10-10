@@ -62,14 +62,44 @@ pub struct ClipStore {
     dir: PathBuf,
 }
 
-fn fnv(data: &[u8]) -> u64 {
+/// Hash of every pixel (8 bytes at a time — a 4K image takes a few ms). Sampling
+/// only some bytes made two screenshots that differ in one cell look identical,
+/// and the newer one never reached the history.
+pub fn image_hash(data: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
-    let step = (data.len() / 65_536).max(1);
-    for b in data.iter().step_by(step) {
+    let mut words = data.chunks_exact(8);
+    for w in &mut words {
+        h ^= u64::from_le_bytes([w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]]);
+        h = h.wrapping_mul(0x100000001b3);
+        h ^= h >> 29;
+    }
+    for b in words.remainder() {
         h ^= *b as u64;
         h = h.wrapping_mul(0x100000001b3);
     }
     h ^ data.len() as u64
+}
+
+/// An image ready to enter the history: PNG already written to the clips folder.
+/// All the slow work (PNG, thumbnail, disk) happens before the history is locked,
+/// so pinning, pasting or deleting never waits for a big screenshot.
+pub struct EncodedImage {
+    id: String,
+    file: String,
+    width: u32,
+    height: u32,
+    hash: u64,
+    thumb: Option<String>,
+}
+
+pub fn encode_image(dir: &std::path::Path, width: u32, height: u32, rgba: &[u8], hash: u64) -> Option<EncodedImage> {
+    let id = new_id();
+    let png = img::encode_png(width, height, rgba)?;
+    let file = format!("{id}.png");
+    fs::write(dir.join(&file), &png).ok()?;
+    let (tw, th, small) = img::shrink(width, height, rgba, 160);
+    let thumb = img::encode_png(tw, th, &small).map(|b| data_url("image/png", &b));
+    Some(EncodedImage { id, file, width, height, hash, thumb })
 }
 
 impl ClipStore {
@@ -180,36 +210,56 @@ impl ClipStore {
                 }
             }
             ClipData::Image { width, height, rgba } => {
-                let hash = fnv(&rgba);
-                if let Some(i) = self.entries.iter().position(|e| e.kind == "image" && e.hash == hash) {
-                    self.bump(i, source);
-                } else {
-                    let id = new_id();
-                    let Some(png) = img::encode_png(width, height, &rgba) else { return false };
-                    let fname = format!("{id}.png");
-                    if fs::write(self.dir.join(&fname), &png).is_err() {
-                        return false;
-                    }
-                    let (tw, th, small) = img::shrink(width, height, &rgba, 160);
-                    let thumb = img::encode_png(tw, th, &small).map(|b| data_url("image/png", &b));
-                    self.entries.push(ClipEntry {
-                        id,
-                        kind: "image".into(),
-                        text: format!("Изображение {width}×{height}"),
-                        files: vec![],
-                        image: Some(fname),
-                        width,
-                        height,
-                        hash,
-                        thumb,
-                        source,
-                        ts: now_ms(),
-                        pinned: false,
-                    });
+                let hash = image_hash(&rgba);
+                if self.bump_image(hash, width, height, &source) {
+                    return true;
                 }
+                let Some(img) = encode_image(&self.dir, width, height, &rgba, hash) else { return false };
+                return self.add_image(img, source, limit);
             }
         }
         self.trim(limit);
+        self.save();
+        true
+    }
+
+    fn image_index(&self, hash: u64, width: u32, height: u32) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|e| e.kind == "image" && e.hash == hash && e.width == width && e.height == height)
+    }
+
+    /// The same picture copied again: move it to the top. False when it's new.
+    pub fn bump_image(&mut self, hash: u64, width: u32, height: u32, source: &str) -> bool {
+        let Some(i) = self.image_index(hash, width, height) else { return false };
+        self.bump(i, source.to_string());
+        self.save();
+        true
+    }
+
+    pub fn add_image(&mut self, img: EncodedImage, source: String, limit: usize) -> bool {
+        if let Some(i) = self.image_index(img.hash, img.width, img.height) {
+            // added meanwhile: keep the existing entry
+            let _ = fs::remove_file(self.dir.join(&img.file));
+            self.bump(i, source);
+        } else {
+            let (width, height) = (img.width, img.height);
+            self.entries.push(ClipEntry {
+                id: img.id,
+                kind: "image".into(),
+                text: format!("Изображение {width}×{height}"),
+                files: vec![],
+                image: Some(img.file),
+                width,
+                height,
+                hash: img.hash,
+                thumb: img.thumb,
+                source,
+                ts: now_ms(),
+                pinned: false,
+            });
+            self.trim(limit);
+        }
         self.save();
         true
     }

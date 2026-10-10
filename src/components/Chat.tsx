@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { call, type Settings } from "../api";
-import { chat, type ChatAttachment } from "../lib/chatStore";
+import { chat, type ChatAttachment, type ChatMsg } from "../lib/chatStore";
 import { Markdown } from "../lib/markdown";
 import { IChat, IClose, IFile, IImage, IPaperclip, IPlus, ISend, IStop } from "./Icons";
 import type { ToastData } from "./Toast";
@@ -31,6 +31,52 @@ function Chip({ a, onRemove }: { a: ChatAttachment; onRemove?: () => void }) {
     </span>
   );
 }
+
+/** One message. Memoised: while a reply streams only that message re-renders,
+ *  not the markdown of the whole dialogue. */
+const Msg = memo(function Msg({ m, canRetry, onCopy }: { m: ChatMsg; canRetry: boolean; onCopy: (code: string) => void }) {
+  if (m.role === "user")
+    return (
+      <div className="msg msg-user">
+        {m.attachments && (
+          <div className="msg-files">
+            {m.attachments.map((a, i) => (
+              <Chip key={i} a={a} />
+            ))}
+          </div>
+        )}
+        {m.text && <div className="msg-bubble">{m.text}</div>}
+      </div>
+    );
+  return (
+    <div className="msg msg-ai">
+      {m.text && (
+        <div className="md">
+          <Markdown text={m.text} onCopy={onCopy} />
+        </div>
+      )}
+      {m.pending && !m.text && (
+        <div className="ly-dots chat-dots">
+          <i />
+          <i />
+          <i />
+        </div>
+      )}
+      {m.pending && m.text && <span className="chat-caret" />}
+      {m.error && (
+        <div className="msg-error">
+          {m.error}
+          {/* only the last answer can be retried: retry resends the last question */}
+          {canRetry && (
+            <button className="text-btn" onClick={() => chat.retry()}>
+              Повторить
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
 
 export function Chat({ settings, toast, setBusy, ask, onAsked, setDropHandler, openSettings }: ChatProps) {
   const st = useSyncExternalStore(chat.subscribe, chat.get);
@@ -67,10 +113,20 @@ export function Chat({ settings, toast, setBusy, ask, onAsked, setDropHandler, o
     return () => setDropHandler(null);
   }, [setDropHandler]);
 
-  // question from the launcher
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  const copyCode = useCallback((code: string) => {
+    call("copy_text", { text: code })
+      .then(() => toastRef.current({ icon: "copy", title: "Код скопирован" }))
+      .catch((e) => toastRef.current({ icon: "error", tone: "error", title: "Не скопировалось", subtitle: String(e) }));
+  }, []);
+
+  // question from the launcher (a reply still streaming is cut short — the new
+  // question wins instead of being silently dropped)
   useEffect(() => {
     if (!ask) return;
     chat.load().then(() => {
+      if (chat.get().streaming) chat.stop();
       chat.send(ask.text);
       onAsked();
     });
@@ -105,6 +161,8 @@ export function Chat({ settings, toast, setBusy, ask, onAsked, setDropHandler, o
     try {
       const paths = await call<string[]>("pick_files", { title: "Прикрепить к сообщению" });
       if (paths.length) await addPaths(paths);
+    } catch {
+      /* dialog failed to open — nothing to attach */
     } finally {
       setBusy(false);
     }
@@ -154,50 +212,9 @@ export function Chat({ settings, toast, setBusy, ask, onAsked, setDropHandler, o
             <div className="hint">Можно прикрепить картинку, PDF, DOCX или код — или перетащить файл сюда</div>
           </div>
         )}
-        {st.messages.map((m) =>
-          m.role === "user" ? (
-            <div key={m.id} className="msg msg-user">
-              {m.attachments && (
-                <div className="msg-files">
-                  {m.attachments.map((a, i) => (
-                    <Chip key={i} a={a} />
-                  ))}
-                </div>
-              )}
-              {m.text && <div className="msg-bubble">{m.text}</div>}
-            </div>
-          ) : (
-            <div key={m.id} className="msg msg-ai">
-              {m.text && (
-                <div className="md">
-                  <Markdown
-                    text={m.text}
-                    onCopy={(code) => {
-                      call("copy_text", { text: code });
-                      toast({ icon: "copy", title: "Код скопирован" });
-                    }}
-                  />
-                </div>
-              )}
-              {m.pending && !m.text && (
-                <div className="ly-dots chat-dots">
-                  <i />
-                  <i />
-                  <i />
-                </div>
-              )}
-              {m.pending && m.text && <span className="chat-caret" />}
-              {m.error && (
-                <div className="msg-error">
-                  {m.error}
-                  <button className="text-btn" onClick={() => chat.retry()}>
-                    Повторить
-                  </button>
-                </div>
-              )}
-            </div>
-          ),
-        )}
+        {st.messages.map((m, i) => (
+          <Msg key={m.id} m={m} canRetry={i === st.messages.length - 1 && !streaming} onCopy={copyCode} />
+        ))}
       </div>
 
       <div className="chat-composer">

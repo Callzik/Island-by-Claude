@@ -18,6 +18,7 @@ import {
 import { Liquid, type LiquidTarget } from "./liquid";
 import { accentFrom, DEFAULT_ACCENT, type RGB } from "./lib/color";
 import { Compact, Peek } from "./components/Compact";
+import { chat } from "./lib/chatStore";
 import { Toast, type ToastData } from "./components/Toast";
 import { DropZones, type DropZone } from "./components/DropZones";
 import { Panel, type Tab } from "./components/Panel";
@@ -292,6 +293,18 @@ export default function App({ boot }: { boot: InitPayload }) {
     setToast(null);
   }, []);
 
+  // A command that failed and nobody handled it (Rust returned Err(String)):
+  // say so instead of silently doing nothing.
+  useEffect(() => {
+    const onRejection = (e: PromiseRejectionEvent) => {
+      if (typeof e.reason !== "string" || !e.reason) return;
+      e.preventDefault();
+      showToast({ icon: "error", tone: "error", title: "Не получилось", subtitle: e.reason.slice(0, 120) }, 3500);
+    };
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => window.removeEventListener("unhandledrejection", onRejection);
+  }, [showToast]);
+
   const peekTimer = useRef(0);
   const triggerPeek = useCallback(() => {
     setPeek(true);
@@ -318,8 +331,25 @@ export default function App({ boot }: { boot: InitPayload }) {
       setPanelOpen(true);
       window.clearTimeout(unarmedTimer.current);
       if (!armed) {
-        unarmedTimer.current = window.setTimeout(() => {
+        // an answer being written keeps the panel open, and once it's done
+        // there is time to read it (longer answers get longer)
+        let readUntil = 0;
+        unarmedTimer.current = window.setTimeout(function fold() {
           const n = live.current;
+          if (chat.get().streaming) {
+            readUntil = -1;
+            unarmedTimer.current = window.setTimeout(fold, 1000);
+            return;
+          }
+          if (readUntil === -1) {
+            const msgs = chat.get().messages;
+            const len = msgs.length ? msgs[msgs.length - 1].text.length : 0;
+            readUntil = Date.now() + Math.min(40000, 8000 + len * 40);
+          }
+          if (readUntil > Date.now()) {
+            unarmedTimer.current = window.setTimeout(fold, readUntil - Date.now());
+            return;
+          }
           if (!n.armed && n.panelOpen && !n.pinned && !n.busy) closePanel();
         }, 9000);
       }
@@ -355,7 +385,9 @@ export default function App({ boot }: { boot: InitPayload }) {
       setLauncherOpen(false);
       call("launcher_closed", { restore: false }).catch(() => {});
       setAsk({ text, n: Date.now() });
-      openPanel("chat", true);
+      // not armed: the cursor is usually somewhere else (the launcher input had
+      // focus), and an armed panel would fold on the first mouse move
+      openPanel("chat", false);
     },
     [openPanel],
   );
@@ -499,12 +531,28 @@ export default function App({ boot }: { boot: InitPayload }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [closePanel]);
 
+  // Changes are applied at once and merged into the latest settings, so two quick
+  // edits (a field saved on blur, then a toggle) never overwrite each other.
+  const settingsRef = useRef(settings);
+  const saveSeq = useRef(0);
   const saveSettings = useCallback(
-    async (next: Settings) => {
+    async (patch: Partial<Settings>) => {
+      const prev = settingsRef.current;
+      const next = { ...prev, ...patch };
+      settingsRef.current = next;
+      setSettings(next);
+      const seq = ++saveSeq.current;
       try {
         const saved = await call<Settings>("save_settings", { settings: next });
-        setSettings(saved);
+        if (seq === saveSeq.current) {
+          settingsRef.current = saved;
+          setSettings(saved);
+        }
       } catch (e) {
+        if (seq === saveSeq.current) {
+          settingsRef.current = prev;
+          setSettings(prev);
+        }
         showToast({ icon: "error", tone: "error", title: "Не сохранилось", subtitle: String(e) }, 3500);
       }
     },
