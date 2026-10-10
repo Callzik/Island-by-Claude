@@ -1,0 +1,52 @@
+# Files uploaded through the GitHub website often land in the repository root
+# instead of src/… or src-tauri/…. This moves every such file onto the file
+# with the same name inside src/ or src-tauri/, commits, and starts the build.
+name: Fix file layout
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Move files from the root into their folders
+        id: move
+        shell: bash
+        run: |
+          keep=" README.md index.html package.json package-lock.json tsconfig.json vite.config.ts LICENSE "
+          moved=0
+          for f in *; do
+            [ -f "$f" ] || continue
+            case "$keep" in *" $f "*) continue ;; esac
+            mapfile -t hits < <(git ls-files src src-tauri | awk -v n="$f" -F/ '$NF == n')
+            if [ "${#hits[@]}" -eq 1 ]; then
+              mv -f -- "$f" "${hits[0]}"
+              git add -A -- "$f" "${hits[0]}"
+              echo "$f -> ${hits[0]}"
+              moved=1
+            else
+              echo "::warning::$f: ${#hits[@]} files with this name in src/src-tauri — left in place"
+            fi
+          done
+          echo "moved=$moved" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and start the build
+        if: steps.move.outputs.moved == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Файлы из корня разложены по папкам"
+          git push
+          # a push made by this workflow doesn't start other workflows by itself
+          gh workflow run build.yml --ref "${GITHUB_REF_NAME}"
