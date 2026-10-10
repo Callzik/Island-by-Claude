@@ -32,13 +32,15 @@ export function LyricWords({ words }: { words: { text: string }[] }) {
 
 const FONT = 14;
 const FONT_MIN = 12.5;
+/** width of the soft edge where a long line runs out of the island (px) */
+const FADE = 18;
 
 /** Music playing, island collapsed: artwork on the left, the current lyric line in the middle, bars are drawn on the canvas. */
 export function Compact({ cover, media, mediaAt, lyrics }: { cover: string | null; media: Media | null; mediaAt: number; lyrics: LyricsState }) {
   const lines = lyrics.lines;
   const wrapRef = useRef<HTMLDivElement>(null);
   const els = useRef(new Map<number, HTMLDivElement>());
-  const scroll = useRef<{ el: HTMLElement | null; x: number }>({ el: null, x: 0 });
+  const scroll = useRef<{ el: HTMLElement | null; x: number; fl: number; fr: number }>({ el: null, x: 0, fl: 0, fr: 0 });
 
   // long lines: follow the highlight smoothly instead of shrinking the text
   const onSweep = (el: HTMLElement, sweep: number) => {
@@ -54,6 +56,12 @@ export function Compact({ cover, media, mediaAt, lyrics }: { cover: string | nul
     s.x += (target - s.x) * 0.08;
     if (Math.abs(target - s.x) < 0.1) s.x = target;
     el.style.transform = s.x > 0.05 ? `translateX(${-s.x}px)` : "";
+    // fade an edge only where text actually runs past it, so the first and
+    // last letters of a line that fits are never dimmed
+    const fl = Math.round(Math.min(FADE, s.x) * 2) / 2;
+    const fr = Math.round(Math.min(FADE, Math.max(0, over - s.x)) * 2) / 2;
+    if (s.fl !== fl) wrap.style.setProperty("--fl", `${(s.fl = fl)}px`);
+    if (s.fr !== fr) wrap.style.setProperty("--fr", `${(s.fr = fr)}px`);
   };
 
   const idx = useLyricSync(lines, media, mediaAt, (i) => els.current.get(i) ?? null, onSweep);
