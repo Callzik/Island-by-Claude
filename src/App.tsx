@@ -48,6 +48,31 @@ const BOX: Record<Exclude<Mode, "launcher">, { w: number; h: number; r: number }
 const LAUNCHER_W = 680;
 const MUSIC_LYRICS_W = 470;
 
+/** Cursor left the panel: how long before it folds (ms). Just enough to ignore
+ *  brushing the edge. */
+const LEAVE_MS = 90;
+
+/** Field with text being typed into right now (losing it would be annoying). */
+function typing(): boolean {
+  if (!document.hasFocus()) return false;
+  const a = document.activeElement;
+  if (a instanceof HTMLTextAreaElement) return a.value.trim() !== "";
+  if (a instanceof HTMLInputElement && a.type !== "range" && a.type !== "checkbox") return a.value.trim() !== "";
+  return false;
+}
+
+/** Reasons to keep the panel open after the cursor has left it. */
+function holdOpen(n: { lmb: boolean; busy: boolean }): boolean {
+  // button held: slider drag, text selection, file drag out
+  if (n.lmb) return true;
+  const a = document.activeElement;
+  const editing = document.hasFocus() && (a instanceof HTMLTextAreaElement || (a instanceof HTMLInputElement && a.type !== "range"));
+  // a focused field decides by itself: empty → fold, text in it → wait
+  if (editing) return typing();
+  // native file dialog / device list / drag-out in progress
+  return n.busy;
+}
+
 export default function App({ boot }: { boot: InitPayload }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const clipRef = useRef<HTMLDivElement>(null);
@@ -365,12 +390,12 @@ export default function App({ boot }: { boot: InitPayload }) {
               leaveT = 0;
               const n = live.current;
               if (!n.panelOpen || n.pinned) return;
-              if (n.lmb || n.busy) {
-                leaveT = window.setTimeout(check, 300);
+              if (holdOpen(n)) {
+                leaveT = window.setTimeout(check, 150);
                 return;
               }
               closePanel();
-            }, 420);
+            }, LEAVE_MS);
           }
         }
       }),
@@ -489,6 +514,12 @@ export default function App({ boot }: { boot: InitPayload }) {
   const setBusy = useCallback((b: boolean) => {
     live.current.busy = b;
   }, []);
+
+  // a tab that set "busy" and then went away (unmounted while a field was
+  // focused, menu left open) must not keep the panel from folding
+  useEffect(() => {
+    live.current.busy = false;
+  }, [tab, panelOpen]);
 
   const content = useMemo(() => {
     switch (mode) {
